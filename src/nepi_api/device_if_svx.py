@@ -6,7 +6,7 @@
 # (see https://github.com/nepi-engine/nepi_engine)
 #
 # License: NEPI Engine repo source-code and NEPI Images that use this source-code
-# are licensed under the "Numurus Software License", 
+# are licensed under the "Numurus Software License",
 # which can be found at: <https://numurus.com/wp-content/uploads/Numurus-Software-License-Terms.pdf>
 #
 # Redistributions in source code must retain this top-level comment block.
@@ -17,27 +17,28 @@
 # - mailto:nepi@numurus.com
 #
 
-import os
-import time 
-import copy 
-import math
-import numpy as np
+# SVX (servo) device interface.
+# One SVX instance = one servo. Coordinating multiple servos (e.g. a pan/tilt
+# turret) is the application's job, not this interface's.
+# Open loop: position is reported as the last commanded value; nothing is measured.
+# The API speaks degrees. Conversion to servo pulse width is a driver concern.
 
+import os
+import time
+import copy
+import math
 
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
 from nepi_sdk import nepi_system
-from nepi_sdk import nepi_nav
-from nepi_sdk import nepi_targets
 
 from std_msgs.msg import Empty, Int8, UInt8, UInt32, Int32, Bool, String, Float32, Float64, Header
 
 
 from nepi_interfaces.srv import DeviceInfoQuery, DeviceInfoQueryResponse, DeviceInfoQueryRequest
 
-from nepi_interfaces.msg import DeviceSVXStatus, ServoLimits, ServoPosition, SingleAxisTimedMove, SingleAxisTimedSpeedMove
+from nepi_interfaces.msg import DeviceSVXStatus, ServoLimits
 from nepi_interfaces.srv import SVXCapabilitiesQuery, SVXCapabilitiesQueryRequest, SVXCapabilitiesQueryResponse
-from nepi_interfaces.msg import NavPoseServo
 
 
 
@@ -51,20 +52,11 @@ from nepi_api.system_if import SettingsIF
 class SVXActuatorIF:
     MAX_STATUS_UPDATE_RATE = 3
     MIN_LIMIT_ANGLE = 10
-    # Backup Factory Control Values 
+    # Backup Factory Control Values
     FACTORY_CONTROLS_DICT = {
-                'reverse_pan_enabled' : False,
-                'reverse_tilt_enabled' : False,
-                'speed_ratio' : 0.5
-    }
-
-
-    orientation_dict = {
-        'time_orientation': nepi_utils.get_time(),
-        # Orientation should be provided in Degrees ENU
-        'roll_deg': 0.0,
-        'tilt_deg': 0.0,
-        'pan_deg': 0.0,
+                'reverse_enabled' : False,
+                'speed_ratio' : 0.5,
+                'spin_direction' : 1
     }
 
     ready = False
@@ -77,136 +69,67 @@ class SVXActuatorIF:
     info_report = DeviceInfoQueryResponse()
     caps_report = SVXCapabilitiesQueryResponse()
 
-    has_position_feedback = False
     has_absolute_positioning = False
-    has_timed_positioning = False
-    has_timed_speed_positioning =False
-    has_seperate_servo_control = False
-    has_adjustable_limits = False
     has_adjustable_speed = False
-    has_seperate_servo_speed = False
+    has_limit_controls = False
     has_homing = False
     has_set_home = False
-    has_limit_controls = False
-    has_calibration = False
-    
+    has_spin = False
+    has_goto_control = False
+    has_stop_control = False
+
 
     move_decimal_place = 0
     report_decimal_place = 2
 
 
     # Define some member variables
-    pan_now_deg = 0.0
-    pan_goal_deg = 0.0
-    pan_home_pos_deg = 0.0
-    min_pan_softstop_deg = 0.0
-    max_pan_softstop_deg = 0.0
-    tilt_now_deg = 0.0
-    tilt_goal_deg = 0.0
-    tilt_home_pos_deg = 0.0
-    min_tilt_softstop_deg = 0.0
-    max_tilt_softstop_deg = 0.0
+    position_now_deg = 0.0
+    position_goal_deg = 0.0
+    home_pos_deg = 0.0
 
-    home_pan_deg = 0.0
-    home_tilt_deg = 0.0
+    min_hardstop_deg = 0.0
+    max_hardstop_deg = 0.0
+    min_softstop_deg = 0.0
+    max_softstop_deg = 0.0
 
-    has_calibration : False
+    reverse_enabled = False
+    ri = 1
 
+    spin_direction = 1
+    is_spinning = False
 
-    reverse_pan_enabled = False
-    rpi = 1
-    reverse_tilt_enabled = False
-    rti = 1
-
-    last_pan = 0
-    last_tilt = 0
-
-    max_pan_hardstop_deg = 0
-    min_pan_hardstop_deg = 0
-
-    max_tilt_hardstop_deg = 0
-    min_tilt_hardstop_deg = 0
-
-    max_pan_softstop_deg = 0
-    min_pan_softstop_deg = 0
-
-    max_tilt_softstop_deg = 0
-    min_tilt_softstop_deg = 0
-
-    current_position = [0.0,0.0]
-    last_position = current_position
-    position_times = [0.0,0.0]
     speed_ratio = 0.5
-    speed_pan_ratio = speed_ratio
-    speed_tilt_ratio = speed_ratio
     speed_max_dps = 10
 
 
-    tr_source_ref_description = 'tilt_axis_center'
-    tr_end_ref_description = 'nepi_frame'
-
-
     data_source_description = 'servo'
-    data_ref_description = 'tilt_axis_center'
-    data_end_description = 'nepi_frame'
-
-    
-    is_moving = False
-
-    speed_pan_dps = 0
-    pan_last_time = 0
-
-    speed_tilt_dps = 0
-    tilt_last_time = 0
-
-    last_time = 0
-
-    pan_pos_history = []
-    tilt_pos_history = []
-    pan_time_history = [0]
-    tilt_time_history = [0]
-    SPEED_SMOOTHING_WINDOW = 3
-    delay = False
-
-
-
+    data_ref_description = 'servo_axis'
 
 
     ### IF Initialization
-    def __init__(self,  device_info, 
-                 capSettings, factorySettings, 
+    def __init__(self,  device_info,
+                 capSettings, factorySettings,
                  settingUpdateFunction, getSettingsFunction,
                  factoryControls , # Dictionary to be supplied by parent, specific key set is required
                  factoryLimits = None,
                  data_source_description = 'servo',
-                 data_ref_description = 'tilt_axis_center',
+                 data_ref_description = 'servo_axis',
                  stopMovingCb = None, # Required; no args
-                 movePanCb = None, # Required; direction and optional time args
-                 moveTiltCb = None, # Required; direction and optional time args
-                 movePanSpeedRatioCb = None, # Required; direction, speed ratio, and optional time args
-                 moveTiltSpeedRatioCb = None, # Required; direction, speed ratio, and optional time args
-                 setSoftLimitsCb=None,
-                 getSoftLimitsCb=None,
-                 getSpeedMaxCb = None,
+                 gotoPositionCb = None, # None ==> No absolute positioning capability (position_deg)
+                 getPositionCb = None, # Returns last sent position
+                 setSoftLimitsCb = None, # Software defined limits
+                 getSoftLimitsCb = None,
+                 setSpinDirection = None,
+                 getSpinDirection = None,
+                 setSpeedRatioCb = None, # None ==> No speed adjustment capability; speed ratio arg
+                 getSpeedRatioCb = None, # None ==> No speed adjustment capability; returns speed ratio
                  setSpeedMaxCb = None,
-                 setSpeedRatioCb=None, # None ==> No speed adjustment capability; Speed ratio arg
-                 getSpeedRatioCb=None, # None ==> No speed adjustment capabilitiy; Returns speed ratio
-                 setPanSpeedRatioCb=None,
-                 setTiltSpeedRatioCb=None,
-                 getPanSpeedRatioCb=None,
-                 getTiltSpeedRatioCb=None,
-                 getPositionCb=None,
-                 getPositionTimesCb=None,
-                 gotoPositionCb=None, # None ==> No absolute positioning capability (pan_deg, tilt_deg, speed, float move_timeout_s) 
-                 gotoPanPositionCb=None, # None ==> No absolute positioning capability (pan_deg, tilt_deg, speed, float move_timeout_s) 
-                 gotoTiltPositionCb=None, # None ==> No absolute positioning capability (pan_deg, tilt_deg, speed, float move_timeout_s) 
-                 goHomeCb=None, # None ==> No native driver homing capability, can still use homing if absolute positioning is supported
-                 setHomePositionCb=None, # None ==> No native driver home absolute setting capability, can still use it if absolute positioning is supported
-                 setHomePositionHereCb=None, # None ==> No native driver home instant capture capability, can still use it if absolute positioning is supported
-                 getNavPoseCb=None,
-                 navpose_update_rate = 10,
+                 getSpeedMaxCb = None,
+                 goHomeCb = None, # None ==> No homing; can still home if absolute positioning is supported
+                 setHomePositionCb = None,
+                 setHomePositionHereCb = None,
                  deviceResetCb = None,
-                 calibrateCenterCB = None,
                  log_name = None,
                  log_name_list = [],
                  msg_if = None
@@ -220,7 +143,7 @@ class SVXActuatorIF:
         self.data_products_list = []
 
 
-        ##############################  
+        ##############################
         # Create Msg Class
         if msg_if is not None:
             self.msg_if = msg_if
@@ -241,7 +164,7 @@ class SVXActuatorIF:
         self.serial_num = device_info["serial_number"]
         self.hw_version = device_info["hw_version"]
         self.sw_version = device_info["sw_version"]
-        
+
         self.status_msg.device_name = self.device_name
         self.status_msg.device_path = self.path
         self.status_msg.device_node_name = self.node_name
@@ -276,56 +199,35 @@ class SVXActuatorIF:
         self.deviceResetCb = deviceResetCb
 
 
-       # Configure SVX Capabilities
+        # Configure SVX Capabilities
 
         # STOP MOVE #############
         self.stopMovingCb = stopMovingCb
-
+        if self.stopMovingCb is not None:
+            self.has_stop_control = True
 
         # GET POSITION #############
+        # Open loop: getPositionCb returns the last commanded position, nothing measured
         self.getPositionCb = getPositionCb
-        if self.getPositionCb is not None:
-            self.has_position_feedback = True
-            self.has_limit_controls = True
-        self.getPositionTimesCb = getPositionTimesCb
 
-        self.getNavPoseCb = getNavPoseCb
-        if navpose_update_rate < 1:
-           navpose_update_rate = 1
-        if navpose_update_rate > 10:
-            navpose_update_rate = 10
-        self.navpose_update_rate = navpose_update_rate
-
-
-
-        # Soft Limits are handled by SVX IF at top level, 
+        # Soft Limits are handled by SVX IF at top level,
         # these are for updating the hardware if required
         self.setSoftLimitsCb = setSoftLimitsCb
         self.getSoftLimitsCb = getSoftLimitsCb
+        if self.getSoftLimitsCb is not None:
+            self.has_limit_controls = True
 
         # POSITION MOVE ############
         self.gotoPositionCb = gotoPositionCb
-        self.gotoPanPositionCb = gotoPanPositionCb
-        self.gotoTiltPositionCb = gotoTiltPositionCb
-
-
-        if self.gotoPositionCb is not None or self.gotoPanPositionCb is not None:
+        if self.gotoPositionCb is not None:
             self.has_absolute_positioning = True
-    
-        if gotoPanPositionCb is not None and gotoTiltPositionCb is not None:
-            self.has_seperate_servo_control = True
+            self.has_goto_control = True
 
-        # JOG MOVE ############
-        self.movePanCb = movePanCb
-        self.moveTiltCb = moveTiltCb
-        if self.movePanCb is not None or self.moveTiltCb is not None:
-            self.has_timed_positioning = True
-
-        # JOG MOVE at Speed Ratio ############
-        self.movePanSpeedRatioCb = movePanSpeedRatioCb
-        self.moveTiltSpeedRatioCb = moveTiltSpeedRatioCb
-        if self.movePanSpeedRatioCb is not None or self.moveTiltSpeedRatioCb is not None:
-            self.has_timed_speed_positioning = True
+        # SPIN DIRECTION  #############
+        self.setSpinDirection = setSpinDirection
+        self.getSpinDirection = getSpinDirection
+        if self.setSpinDirection is not None:
+            self.has_spin = True
 
         # SPEED SETTINGS  #############
         self.setSpeedMaxCb = setSpeedMaxCb
@@ -333,108 +235,60 @@ class SVXActuatorIF:
         if self.getSpeedMaxCb is not None:
             self.speed_max_dps = self.getSpeedMaxCb()
 
-
         self.setSpeedRatioCb = setSpeedRatioCb
-        if setSpeedRatioCb is None:
-            self.getSpeedRatioCb = self.getZeroCb #None
-        else:
-            self.setSpeedRatioCb = setSpeedRatioCb
         self.getSpeedRatioCb = getSpeedRatioCb
-        if getSpeedRatioCb is not None and setSpeedRatioCb is not None:
+        if setSpeedRatioCb is not None and getSpeedRatioCb is not None:
             self.has_adjustable_speed = True
-
-        # PER-AXIS SPEED SETTINGS  #############
-        self.setPanSpeedRatioCb = setPanSpeedRatioCb
-        self.setTiltSpeedRatioCb = setTiltSpeedRatioCb
-        self.getPanSpeedRatioCb = getPanSpeedRatioCb
-        self.getTiltSpeedRatioCb = getTiltSpeedRatioCb
-        if (setPanSpeedRatioCb is not None and setTiltSpeedRatioCb is not None and
-                getPanSpeedRatioCb is not None and getTiltSpeedRatioCb is not None):
-            self.has_seperate_servo_speed = True
-
 
         # Homing  #############
         self.goHomeCb = goHomeCb
         self.setHomePositionCb = setHomePositionCb
         self.setHomePositionHereCb = setHomePositionHereCb
-
         if self.goHomeCb is not None:
             self.has_homing = True
         if self.setHomePositionHereCb is not None:
             self.has_set_home = True
-               
-        # Calibration  #############
-        self.calibrateCenterCB = calibrateCenterCB
-        if self.calibrateCenterCB is not None:
-            self.has_calibration = True
-
-
 
 
         # Create Capabilities Report
-        self.caps_report = SVXCapabilitiesQueryResponse()
+        self.caps_report.mode = 0
         self.caps_report.has_absolute_positioning = self.has_absolute_positioning
-        self.caps_report.has_timed_positioning = self.has_timed_positioning
-        self.caps_report.has_timed_speed_positioning = self.has_timed_speed_positioning
-        self.caps_report.has_seperate_servo_control = self.has_seperate_servo_control
-        self.caps_report.has_position_feedback = self.has_position_feedback
         self.caps_report.has_adjustable_speed = self.has_adjustable_speed
-        self.caps_report.has_seperate_servo_speed = self.has_seperate_servo_speed
-        self.caps_report.has_limit_controls = self.has_limit_controls
+        self.caps_report.has_limit_control = self.has_limit_controls
         self.caps_report.has_homing = self.has_homing
         self.caps_report.has_set_home = self.has_set_home
-        self.caps_report.has_calibration = self.has_calibration
+        self.caps_report.has_spin_control = self.has_spin
+        self.caps_report.has_goto_control = self.has_goto_control
+        self.caps_report.has_stop_control = self.has_stop_control
+        self.caps_report.max_speed_dps = self.speed_max_dps
 
 
         #######################################
         # Set up factory limits
 
-        if factoryLimits is not None:
-            self.factoryLimits = factoryLimits  
-        else:
-            # Hard limits
-            self.factoryLimits['min_pan_hardstop_deg'] = 0
-            self.factoryLimits['max_pan_hardstop_deg'] = 0
-            self.factoryLimits['min_tilt_hardstop_deg'] = 0
-            self.factoryLimits['max_tilt_hardstop_deg'] = 0
-  
-            # Soft limits
-            self.factoryLimits['min_pan_softstop_deg'] = 0
-            self.factoryLimits['max_pan_softstop_deg'] = 0
-            self.factoryLimits['min_tilt_softstop_deg'] = 0
-            self.factoryLimits['max_tilt_softstop_deg'] = 0
+        if factoryLimits is None:
+            factoryLimits = dict()
+        self.factoryLimits = factoryLimits
+        for key in ['min_hardstop_deg','max_hardstop_deg','min_softstop_deg','max_softstop_deg']:
+            if key not in self.factoryLimits:
+                self.factoryLimits[key] = 0
 
-        self.min_pan_hardstop_deg =  self.factoryLimits['min_pan_hardstop_deg']
-        self.max_pan_hardstop_deg = self.factoryLimits['max_pan_hardstop_deg']
-
-        self.min_tilt_hardstop_deg = self.factoryLimits['min_tilt_hardstop_deg']
-        self.max_tilt_hardstop_deg = self.factoryLimits['max_tilt_hardstop_deg']
+        self.min_hardstop_deg = self.factoryLimits['min_hardstop_deg']
+        self.max_hardstop_deg = self.factoryLimits['max_hardstop_deg']
+        self.min_softstop_deg = self.factoryLimits['min_softstop_deg']
+        self.max_softstop_deg = self.factoryLimits['max_softstop_deg']
 
 
-        self.min_pan_softstop_deg =  self.factoryLimits['min_pan_softstop_deg']
-        self.max_pan_softstop_deg = self.factoryLimits['max_pan_softstop_deg']
-
-
-        self.min_tilt_softstop_deg = self.factoryLimits['min_tilt_softstop_deg']
-        self.max_tilt_softstop_deg = self.factoryLimits['max_tilt_softstop_deg']
-
-
-        ########################       
+        ########################
         self.status_msg.data_source_description = self.data_source_description
         self.status_msg.data_ref_description = self.data_ref_description
 
         self.status_msg.has_absolute_positioning = self.has_absolute_positioning
-        self.status_msg.has_timed_positioning = self.has_timed_positioning
-        self.status_msg.has_timed_speed_positioning = self.has_timed_speed_positioning
-        self.status_msg.has_seperate_servo_control = self.has_seperate_servo_control
-        self.status_msg.has_position_feedback = self.has_position_feedback
         self.status_msg.has_adjustable_speed = self.has_adjustable_speed
-        self.status_msg.has_seperate_servo_speed = self.has_seperate_servo_speed
         self.status_msg.has_limit_controls = self.has_limit_controls
-
         self.status_msg.has_homing = self.has_homing
         self.status_msg.has_set_home = self.has_set_home
-        self.status_msg.has_calibration = self.has_calibration
+        self.status_msg.has_spin = self.has_spin
 
 
         ##################################################
@@ -462,41 +316,29 @@ class SVXActuatorIF:
                 'namespace': self.namespace,
                 'factory_val': self.speed_max_dps
             },
-            'speed_ratios': {
+            'speed_ratio': {
                 'namespace': self.namespace,
-                'factory_val': [self.speed_pan_ratio,self.speed_tilt_ratio]
+                'factory_val': self.factory_controls_dict['speed_ratio']
             },
-            'home_position/pan_deg': {
+            'home_position/deg': {
                 'namespace': self.namespace,
                 'factory_val': 0.0
             },
-            'home_position/tilt_deg': {
+            'reverse_enabled': {
                 'namespace': self.namespace,
-                'factory_val': 0.0
+                'factory_val': self.factory_controls_dict['reverse_enabled']
             },
-            'reverse_pan_enabled': {
+            'spin_direction': {
                 'namespace': self.namespace,
-                'factory_val': self.factory_controls_dict['reverse_pan_enabled']
-            },            
-            'reverse_tilt_enabled': {
-                'namespace': self.namespace,
-                'factory_val': self.factory_controls_dict['reverse_tilt_enabled']
+                'factory_val': self.factory_controls_dict['spin_direction']
             },
-            'max_pan_softstop_deg': {
+            'max_softstop_deg': {
                 'namespace': self.namespace,
-                'factory_val': self.factoryLimits['max_pan_softstop_deg']
-            },            
-            'min_pan_softstop_deg': {
+                'factory_val': self.factoryLimits['max_softstop_deg']
+            },
+            'min_softstop_deg': {
                 'namespace': self.namespace,
-                'factory_val': self.factoryLimits['min_pan_softstop_deg']
-            },            
-            'max_tilt_softstop_deg': {
-                'namespace': self.namespace,
-                'factory_val': self.factoryLimits['max_tilt_softstop_deg']
-            },           
-            'min_tilt_softstop_deg': {
-                'namespace': self.namespace,
-                'factory_val': self.factoryLimits['min_tilt_softstop_deg']
+                'factory_val': self.factoryLimits['min_softstop_deg']
             },
             'move_decimal_place': {
                 'namespace': self.namespace,
@@ -507,16 +349,6 @@ class SVXActuatorIF:
                 'factory_val': 2
             }
         }
-
-        if self.has_seperate_servo_speed:
-            self.PARAMS_DICT['speed_pan_ratio'] = {
-                'namespace': self.namespace,
-                'factory_val': 0.5
-            }
-            self.PARAMS_DICT['speed_tilt_ratio'] = {
-                'namespace': self.namespace,
-                'factory_val': 0.5
-            }
 
 
         # Services Config Dict ####################
@@ -548,35 +380,49 @@ class SVXActuatorIF:
                 'msg': DeviceSVXStatus,
                 'qsize': 10,
                 'latch': False
-            },
-            'servo_pub': {
-                'msg': NavPoseServo,
-                'namespace': self.namespace,
-                'topic': 'servo',
-                'qsize': 1,
-                'latch': False
-            },
-            'stop_pan_callback_pub': {
-                'msg': Empty,
-                'namespace': self.namespace,
-                'topic': 'stop_pan_callback',
-                'qsize': 1,
-                'latch': False
-            },
-            'stop_tilt_callback_pub': {
-                'msg': Empty,
-                'namespace': self.namespace,
-                'topic': 'stop_tilt_callback',
-                'qsize': 1,
-                'latch': False
             }
-
         }
 
 
 
         # Subscribers Config Dict ####################
+        # Exactly the Figure 5 control topics. On each control the IF clamps the
+        # commanded value against the current soft limits, then calls the matching
+        # callback. If a callback is None the corresponding has_* flag is False and
+        # the control is a no-op.
         self.SUBS_DICT = {
+            'goto_position': {
+                'namespace': self.namespace,
+                'topic': 'goto_position',
+                'msg': Float32,
+                'qsize': 1,
+                'callback': self._gotoPositionCb,
+                'callback_args': ()
+            },
+            'goto_ratio': {
+                'namespace': self.namespace,
+                'topic': 'goto_ratio',
+                'msg': Float32,
+                'qsize': 1,
+                'callback': self._gotoRatioCb,
+                'callback_args': ()
+            },
+            'set_soft_limits': {
+                'namespace': self.namespace,
+                'topic': 'set_soft_limits',
+                'msg': ServoLimits,
+                'qsize': 1,
+                'callback': self._setSoftLimitsCb,
+                'callback_args': ()
+            },
+            'set_speed_ratio': {
+                'namespace': self.namespace,
+                'topic': 'set_speed_ratio',
+                'msg': Float32,
+                'qsize': 1,
+                'callback': self._setSpeedRatioCb,
+                'callback_args': ()
+            },
             'set_speed_max_dps': {
                 'namespace': self.namespace,
                 'topic': 'set_speed_max_dps',
@@ -585,28 +431,12 @@ class SVXActuatorIF:
                 'callback': self._setMaxSpeedCb,
                 'callback_args': ()
             },
-            'speed_ratio': {
+            'set_reverse_enable': {
                 'namespace': self.namespace,
-                'topic': 'set_speed_ratio',
-                'msg': Float32,
+                'topic': 'set_reverse_enable',
+                'msg': Bool,
                 'qsize': 1,
-                'callback': self._setSpeedRatioCb,
-                'callback_args': ()
-            },
-            'set_pan_speed_ratio': {
-                'namespace': self.namespace,
-                'topic': 'set_pan_speed_ratio',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._setPanSpeedRatioCb,
-                'callback_args': ()
-            },
-            'set_tilt_speed_ratio': {
-                'namespace': self.namespace,
-                'topic': 'set_tilt_speed_ratio',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._setTiltSpeedRatioCb,
+                'callback': self._setReverseEnableCb,
                 'callback_args': ()
             },
             'stop_moving': {
@@ -614,119 +444,7 @@ class SVXActuatorIF:
                 'topic': 'stop_moving',
                 'msg': Empty,
                 'qsize': 1,
-                'callback': self._stopMovingCb, 
-                'callback_args': ()
-            },
-            'stop_pan': {
-                'namespace': self.namespace,
-                'topic': 'stop_pan',
-                'msg': Empty,
-                'qsize': 1,
-                'callback': self._stopPanCb, 
-                'callback_args': ()
-            },
-            'stop_tilt': {
-                'namespace': self.namespace,
-                'topic': 'stop_tilt',
-                'msg': Empty,
-                'qsize': 1,
-                'callback': self._stopTiltCb, 
-                'callback_args': ()
-            },
-            'goto_to_position': {
-                'namespace': self.namespace,
-                'topic': 'goto_position',
-                'msg': ServoPosition,
-                'qsize': 1,
-                'callback': self._gotoPositionCb, 
-                'callback_args': ()
-            },
-            'goto_to_pan_position': {
-                'namespace': self.namespace,
-                'topic': 'goto_pan_position',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._gotoPanPositionCb, 
-                'callback_args': ()
-            },
-            'goto_to_tilt_position': {
-                'namespace': self.namespace,
-                'topic': 'goto_tilt_position',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._gotoTiltPositionCb, 
-                'callback_args': ()
-            },
-            'goto_pan_ratio': {
-                'namespace': self.namespace,
-                'topic': 'goto_pan_ratio',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._gotoToPanRatioCb, 
-                'callback_args': ()
-            },
-            'goto_tilt_ratio': {
-                'namespace': self.namespace,
-                'topic': 'goto_tilt_ratio',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._gotoToTiltRatioCb, 
-                'callback_args': ()
-            },
-            'jog_timed_pan': {
-                'namespace': self.namespace,
-                'topic': 'jog_timed_pan',
-                'msg': SingleAxisTimedMove,
-                'qsize': 1,
-                'callback': self._jogTimedPanCb, 
-                'callback_args': ()
-            },
-            'jog_timed_tilt': {
-                'namespace': self.namespace,
-                'topic': 'jog_timed_tilt',
-                'msg': SingleAxisTimedMove,
-                'qsize': 1,
-                'callback': self._jogTimedTiltCb, 
-                'callback_args': ()
-            },
-            'jog_timed_pan_speed_ratio': {
-                'namespace': self.namespace,
-                'topic': 'jog_timed_pan_speed_ratio',
-                'msg': SingleAxisTimedSpeedMove,
-                'qsize': 1,
-                'callback': self._jogTimedPanSpeedRatioCb, 
-                'callback_args': ()
-            },
-            'jog_timed_tilt_speed_ratio': {
-                'namespace': self.namespace,
-                'topic': 'jog_timed_tilt_speed_ratio',
-                'msg': SingleAxisTimedSpeedMove,
-                'qsize': 1,
-                'callback': self._jogTimedTiltSpeedRatioCb, 
-                'callback_args': ()
-            },
-            'reverse_pan_enabled': {
-                'namespace': self.namespace,
-                'topic': 'set_reverse_pan_enable',
-                'msg': Bool,
-                'qsize': 1,
-                'callback': self._setReversePanEnableCb, 
-                'callback_args': ()
-            },
-            'reverse_tilt_enabled': {
-                'namespace': self.namespace,
-                'topic': 'set_reverse_tilt_enable',
-                'msg': Bool,
-                'qsize': 1,
-                'callback': self._setReverseTiltEnableCb, 
-                'callback_args': ()
-            },
-            'set_soft_limits': {
-                'namespace': self.namespace,
-                'topic': 'set_soft_limits',
-                'msg': ServoLimits,
-                'qsize': 1,
-                'callback': self._setSoftstopCb, 
+                'callback': self._stopMovingCb,
                 'callback_args': ()
             },
             'go_home': {
@@ -734,15 +452,15 @@ class SVXActuatorIF:
                 'topic': 'go_home',
                 'msg': Empty,
                 'qsize': 1,
-                'callback': self._goHomeCb, 
+                'callback': self._goHomeCb,
                 'callback_args': ()
             },
             'set_home_position': {
                 'namespace': self.namespace,
                 'topic': 'set_home_position',
-                'msg': ServoPosition,
+                'msg': Float32,
                 'qsize': 1,
-                'callback': self._setHomePositionCb, 
+                'callback': self._setHomePositionCb,
                 'callback_args': ()
             },
             'set_home_position_here': {
@@ -750,37 +468,28 @@ class SVXActuatorIF:
                 'topic': 'set_home_position_here',
                 'msg': Empty,
                 'qsize': 1,
-                'callback': self._setHomePositionHereCb, 
+                'callback': self._setHomePositionHereCb,
                 'callback_args': ()
             },
-            'calibrate_center': {
+            'reset_device': {
                 'namespace': self.namespace,
-                'topic': 'calibrate_center',
+                'topic': 'reset_device',
                 'msg': Empty,
                 'qsize': 1,
-                'callback': self._calibrateCenterCB,
+                'callback': self._resetDeviceCb,
                 'callback_args': ()
             },
-            'set_move_decimal_place': {
+            'set_spin_direction': {
                 'namespace': self.namespace,
-                'topic': 'set_move_decimal_place',
+                'topic': 'set_spin_direction',
                 'msg': Int32,
                 'qsize': 1,
-                'callback': self._setMoveDecimalPlaceCb,
-                'callback_args': ()
-            },
-            'set_report_decimal_place': {
-                'namespace': self.namespace,
-                'topic': 'set_report_decimal_place',
-                'msg': Int32,
-                'qsize': 1,
-                'callback': self._setReportDecimalPlaceCb,
+                'callback': self._setSpinDirectionCb,
                 'callback_args': ()
             }
-
         }
-        
-        
+
+
 
 
         # Create Node Class ####################
@@ -804,14 +513,14 @@ class SVXActuatorIF:
         ##############################
         # Start Node Processes
 
-        # Periodic publishing
-        status_update_rate = self.navpose_update_rate  
+        # Periodic status publishing
+        status_update_rate = self.MAX_STATUS_UPDATE_RATE
         if status_update_rate < 1:
             status_update_rate = 1
         if status_update_rate > 10:
             status_update_rate = 10
         self.status_update_rate = status_update_rate
-        self.msg_if.pub_warn("Starting servo status publisher at hz: " + str(self.status_update_rate))    
+        self.msg_if.pub_info("Starting svx status publisher at hz: " + str(self.status_update_rate))
         status_pub_delay = float(1.0) / self.status_update_rate
         nepi_sdk.start_timer_process(status_pub_delay, self._publishStatusCb)
 
@@ -824,13 +533,13 @@ class SVXActuatorIF:
         settings_ns = self.namespace
 
         self.SETTINGS_DICT = {
-                    'capSettings': capSettings, 
+                    'capSettings': capSettings,
                     'factorySettings': factorySettings,
-                    'setSettingFunction': settingUpdateFunction, 
+                    'setSettingFunction': settingUpdateFunction,
                     'getSettingsFunction': getSettingsFunction
 
         }
-        self.settings_if = SettingsIF(namespace = settings_ns, 
+        self.settings_if = SettingsIF(namespace = settings_ns,
                         settings_dict = self.SETTINGS_DICT,
                         log_name_list = self.log_name_list,
                             msg_if = self.msg_if
@@ -849,61 +558,45 @@ class SVXActuatorIF:
 
 
 
-  
-
     def initCb(self, do_updates = False):
         if do_updates == True and self.node_if is not None:
             # This one comes from the parent
             if self.getSoftLimitsCb is not None:
-                    [min_pan,max_pan,min_tilt,max_tilt] = self.getSoftLimitsCb()
-                    if min_pan != -999:
-                        self.min_pan_softstop_deg = min_pan
-                        self.node_if.set_param('min_pan_softstop_deg', self.min_pan_softstop_deg)
-                    if max_pan != -999:
-                        self.max_pan_softstop_deg = max_pan
-                        self.node_if.set_param('max_pan_softstop_deg',self.max_pan_softstop_deg)
-
-                    if min_tilt != -999:
-                        self.min_tilt_softstop_deg = min_tilt
-                        self.node_if.set_param('min_tilt_softstop_deg', self.min_tilt_softstop_deg)
-                    if max_tilt != -999:
-                        self.max_tilt_softstop_deg = max_tilt
-                        self.node_if.set_param('max_tilt_softstop_deg',self.max_tilt_softstop_deg)
-
-
-
+                    [min_deg,max_deg] = self.getSoftLimitsCb()
+                    if min_deg != -999:
+                        self.min_softstop_deg = min_deg
+                        self.node_if.set_param('min_softstop_deg', self.min_softstop_deg)
+                    if max_deg != -999:
+                        self.max_softstop_deg = max_deg
+                        self.node_if.set_param('max_softstop_deg', self.max_softstop_deg)
 
         if self.node_if is not None:
-            self.min_pan_softstop_deg =  self.node_if.get_param('min_pan_softstop_deg')
-            self.max_pan_softstop_deg = self.node_if.get_param('max_pan_softstop_deg')
+            self.min_softstop_deg = self.node_if.get_param('min_softstop_deg')
+            self.max_softstop_deg = self.node_if.get_param('max_softstop_deg')
 
-            self.min_tilt_softstop_deg = self.node_if.get_param('min_tilt_softstop_deg')
-            self.max_tilt_softstop_deg = self.node_if.get_param('max_tilt_softstop_deg')
-
-            if None not in [self.min_pan_softstop_deg,self.max_pan_softstop_deg,self.min_tilt_softstop_deg,self.max_tilt_softstop_deg]:
+            if None not in [self.min_softstop_deg,self.max_softstop_deg]:
                 if self.setSoftLimitsCb is not None:
-                    self.setSoftLimitsCb(self.min_pan_softstop_deg,
-                                        self.max_pan_softstop_deg,
-                                        self.min_tilt_softstop_deg,
-                                        self.max_tilt_softstop_deg)
+                    self.setSoftLimitsCb(self.min_softstop_deg, self.max_softstop_deg)
+
             if self.getSpeedMaxCb is None:
                 self.speed_max_dps = self.node_if.get_param('speed_max_dps')
             if self.setSpeedMaxCb is not None:
-                self.setSpeedMaxCb(self.speed_max_dps) 
+                self.setSpeedMaxCb(self.speed_max_dps)
 
-            if self.has_adjustable_speed == False:
-                if self.setSpeedRatioCb is not None and self.getSpeedRatioCb is not None:
-                    speed_ratios = self.node_if.get_param('speed_ratios')
-                    self.msg_if.pub_warn("Initializing speed_ratio: " + str(self.speed_ratio))
+            speed_ratio = self.node_if.get_param('speed_ratio')
+            if speed_ratio is not None:
+                self.speed_ratio = speed_ratio
+                if self.setSpeedRatioCb is not None:
+                    self.setSpeedRatioCb(self.speed_ratio)
 
-                   
-                if self.has_seperate_servo_speed == True:
-                    self.setPanSpeedRatioCb(speed_ratios[0])
-                    self.setTiltSpeedRatioCb(speed_ratios[1])
-                    self.speed_ratio = max(speed_ratios)
+            self.home_pos_deg = self.node_if.get_param('home_position/deg')
 
-            self.home_pan_deg = self.node_if.get_param('home_position/pan_deg')
-            self.home_tilt_deg = self.node_if.get_param('home_position/tilt_deg')
+            self.reverse_enabled = self.node_if.get_param('reverse_enabled')
+            self.ri = -1 if self.reverse_enabled else 1
+
+            self.spin_direction = self.node_if.get_param('spin_direction')
+            if self.spin_direction is not None and self.setSpinDirection is not None:
+                self.setSpinDirection(self.spin_direction)
 
             move_decimal_place = self.node_if.get_param('move_decimal_place')
             if move_decimal_place is not None:
@@ -912,23 +605,6 @@ class SVXActuatorIF:
             if report_decimal_place is not None:
                 self.report_decimal_place = report_decimal_place
 
-            # self.goHome()
-
-        
-    
-            # Set reverse int values
-            rpi = 1
-            if self.reverse_pan_enabled:
-                rpi = -1
-            self.rpi = rpi
-            rti = 1
-            if self.reverse_tilt_enabled:
-                rti = -1
-            self.rti = rti
-
-            # Setup Joint Info
-            self.reverse_pan_enabled = self.node_if.get_param('reverse_pan_enabled')
-            self.reverse_tilt_enabled = self.node_if.get_param('reverse_tilt_enabled')
         if do_updates == True:
             pass
         self.publish_status()
@@ -960,33 +636,18 @@ class SVXActuatorIF:
     ###############################
     # Class Methods
 
-    def getPanAdj(self,pan_deg):
-        if pan_deg is None:
-            pan_deg = 0.0
-        return pan_deg * self.rpi
+    def getPosAdj(self,deg):
+        if deg is None:
+            deg = 0.0
+        return deg * self.ri
 
-    def getPanRatioAdj(self,ratio):
-        if self.reverse_pan_enabled == True:
+    def getPosRatioAdj(self,ratio):
+        if self.reverse_enabled == True:
             ratio = 1 - ratio
         return ratio
 
-    def getTiltAdj(self,tilt_deg):
-        if tilt_deg is None:
-            tilt_deg = 0.0
-        return tilt_deg * self.rti
-
-    def getServoAdj(self,pan_deg,tilt_deg):
-        adj_pan = self.getPanAdj(pan_deg)
-        adj_tilt = self.getTiltAdj(tilt_deg)
-        return adj_pan,adj_tilt
-
-    def getTiltRatioAdj(self,ratio):
-        if self.reverse_tilt_enabled == True:
-            ratio = 1 - ratio
-        return ratio
-
-    def getPanMinMaxAdj(self,min_deg,max_deg):
-        if self.reverse_pan_enabled == True:
+    def getMinMaxAdj(self,min_deg,max_deg):
+        if self.reverse_enabled == True:
             adj_min = copy.deepcopy(max_deg) * -1
             adj_max = copy.deepcopy(min_deg) * -1
         else:
@@ -994,103 +655,14 @@ class SVXActuatorIF:
             adj_max = max_deg
         return adj_min,adj_max
 
-    def getTiltMinMaxAdj(self,min_deg,max_deg):
-        if self.reverse_tilt_enabled == True:
-            adj_min = copy.deepcopy(max_deg) * -1
-            adj_max = copy.deepcopy(min_deg) * -1
-        else:
-            adj_min = min_deg
-            adj_max = max_deg
+    def getLimitsAdj(self,min_deg,max_deg):
+        [adj_min,adj_max] = self.getMinMaxAdj(min_deg,max_deg)
         return adj_min,adj_max
-
-    def getLimitsAdj(self,pan_min,pan_max,tilt_min,tilt_max):
-        [adj_pan_min,adj_pan_max] = self.getPanMinMaxAdj(pan_min,pan_max)
-        [adj_tilt_min,adj_tilt_max] = self.getTiltMinMaxAdj(tilt_min,tilt_max)
-        return adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max
-
-    def getLimitsHardstopAdj(self):
-        pan_min = self.min_pan_hardstop_deg
-        pan_max = self.max_pan_hardstop_deg
-        [adj_pan_min,adj_pan_max] = self.getPanMinMaxAdj(pan_min,pan_max)
-
-        tilt_min = self.min_tilt_hardstop_deg
-        tilt_max = self.max_tilt_hardstop_deg
-        [adj_tilt_min,adj_tilt_max] = self.getTiltMinMaxAdj(tilt_min,tilt_max)
-
-        return adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max
 
     def getLimitsSoftstopAdj(self):
-        pan_min = self.min_pan_softstop_deg
-        pan_max = self.max_pan_softstop_deg
-        [adj_pan_min,adj_pan_max] = self.getPanMinMaxAdj(pan_min,pan_max)
+        [adj_min,adj_max] = self.getMinMaxAdj(self.min_softstop_deg,self.max_softstop_deg)
+        return adj_min,adj_max
 
-        tilt_min = self.min_tilt_softstop_deg
-        tilt_max = self.max_tilt_softstop_deg
-        [adj_tilt_min,adj_tilt_max] = self.getTiltMinMaxAdj(tilt_min,tilt_max)
-
-        return adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max
-
-
-
-
-    def getSvPosition(self, orien_dict):
-        x = 0.0
-        y = 0.0
-        z = 0.0
-        if orien_dict is not None:
-            
-            ho = 0
-            xo = 0
-            yo = 0
-            zo = 0
-
-            # calculate pos from tilt axis
-            tilt_rad = -1 * math.radians(orien_dict['pitch_deg'])
-            x = (xo * np.cos(tilt_rad) - zo * np.sin(tilt_rad))
-            z = (zo * np.cos(tilt_rad) + xo * np.sin(tilt_rad)) * self.rpi
-
-            # Add tilt axis height
-            z += (ho * self.rpi)
-
-            # Add left right offset
-            y += yo * self.rpi
-
-            # Rotate about center pan axis
-            pan_deg = orien_dict['yaw_deg'] * self.rpi
-            [x,y,z] = nepi_utils.rotate_3d([x,y,z], 'z', pan_deg) 
-
-        return x,y,z
-
-
-    # def getNpPositionAdjustedCb(self):
-    #     pos_dict = dict()
-    #     pos_dict['time_position'] = nepi_utils.get_time()
-    #     pos_dict['x_m'] = 0.0
-    #     pos_dict['y_m'] = 0.0     
-    #     pos_dict['z_m'] = 0.0
-
-    #     if self.getNpPositionCb is not None:
-    #         [x,y,z] = self.getSvPosition(orien_dict)
-    #         pos_dict['x_m'] = round(x,5)
-    #         pos_dict['y_m'] = round(y,5)   
-    #         pos_dict['z_m'] = round(z,5)
-    #         self.msg_if.pub_debug("Calculate navpose x,y,z: " + str([x,y,z]), log_name_list = self.log_name_list, throttle_s = 3.0)
-    #     return pos_dict
-
-    # def getNpOrientationAdjustedCb(self):
-    #     orien_dict = dict()
-    #     orien_dict['time_orientation'] = nepi_utils.get_time()
-    #     orien_dict['yaw_deg'] = self.current_position[0]
-    #     orien_dict['pitch_deg'] = self.current_position[1]      
-
-    #     if self.getNpOrientationCb is not None:
-    #         orien_dict = self.getNpOrientationCb()
-    #         pan_deg = orien_dict['yaw_deg']
-    #         orien_dict['yaw_deg'] = self.getPanAdj(pan_deg)
-    #         tilt_deg = orien_dict['pitch_deg']
-    #         orien_dict['pitch_deg'] = self.getTiltAdj(tilt_deg)
-    #     return orien_dict
-           
 
     def check_ready(self):
         """Returns the current ready state of the SVX device interface.
@@ -1110,7 +682,6 @@ class SVXActuatorIF:
         Returns:
             bool: True if the device became ready within the timeout, False if it did not.
         """
-        success = False
         if self.ready is not None:
             self.msg_if.pub_info("Waiting for connection", log_name_list = self.log_name_list)
             timer = 0
@@ -1122,433 +693,203 @@ class SVXActuatorIF:
                 self.msg_if.pub_info("Failed to Connect", log_name_list = self.log_name_list)
             else:
                 self.msg_if.pub_info("Connected", log_name_list = self.log_name_list)
-        return self.ready   
+        return self.ready
 
 
 
-
-
-    def panRatioToDeg(self, ratio):
-        pan_deg = 0
-        if self.reverse_pan_enabled == False:
-           pan_deg =  self.min_pan_softstop_deg + (1-ratio) * (self.max_pan_softstop_deg - self.min_pan_softstop_deg)
+    def degToRatio(self, deg):
+        span = (self.max_softstop_deg - self.min_softstop_deg)
+        if span == 0:
+            return 0.5
+        if self.reverse_enabled == False:
+            ratio = 1 - (deg - self.min_softstop_deg) / span
         else:
-           pan_deg =  self.max_pan_softstop_deg - (1-ratio)  * (self.max_pan_softstop_deg - self.min_pan_softstop_deg)
-        return  pan_deg
-    
-    def panDegToRatio(self, deg):
-        ratio = 0.5
-        if self.reverse_pan_enabled == False:
-          ratio = 1 - (deg - self.min_pan_softstop_deg) / (self.max_pan_softstop_deg - self.min_pan_softstop_deg)
-        else:
-          ratio = (deg - self.min_pan_softstop_deg) / (self.max_pan_softstop_deg - self.min_pan_softstop_deg)
-        return (ratio)
-     
-    def tiltDegToRatio(self, deg):
-        ratio = 0.5
-        if self.reverse_tilt_enabled == False:
-          ratio = 1 - (deg - self.min_tilt_softstop_deg) / (self.max_tilt_softstop_deg - self.min_tilt_softstop_deg)
-        else:
-          ratio = (deg - self.min_tilt_softstop_deg) / (self.max_tilt_softstop_deg - self.min_tilt_softstop_deg)
+            ratio = (deg - self.min_softstop_deg) / span
         return ratio
-    
-    def tiltRatioToDeg(self, ratio):
-        tilt_deg = 0
-        if self.reverse_tilt_enabled == False:
-           tilt_deg =  self.min_tilt_softstop_deg + (1-ratio) * (self.max_tilt_softstop_deg - self.min_tilt_softstop_deg)
+
+    def ratioToDeg(self, ratio):
+        span = (self.max_softstop_deg - self.min_softstop_deg)
+        if self.reverse_enabled == False:
+            deg = self.min_softstop_deg + (1-ratio) * span
         else:
-           tilt_deg =  (self.max_tilt_softstop_deg) - (1-ratio) * (self.max_tilt_softstop_deg - self.min_tilt_softstop_deg)
-        return  tilt_deg
+            deg = self.max_softstop_deg - (1-ratio) * span
+        return deg
 
 
-
-    def positionWithinSoftLimits(self, pan_deg, tilt_deg):
+    def positionWithinSoftLimits(self, deg):
         valid = False
-        [adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max] = self.getLimitsSoftstopAdj()
-        if (pan_deg <= adj_pan_max) or (pan_deg >= adj_pan_min) or \
-           (tilt_deg <= adj_tilt_max) or (tilt_deg >= adj_tilt_min):
+        [adj_min,adj_max] = self.getLimitsSoftstopAdj()
+        if (deg <= adj_max) and (deg >= adj_min):
             valid = True
-        
         return valid
 
 
-    def getPositionConditioned(self, pan_deg, tilt_deg):
-        [adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max] = self.getLimitsSoftstopAdj()
-        #self.msg_if.pub_info("Checking Positions against soft limits: " + str([pan_deg, tilt_deg]), log_name_list = self.log_name_list)
-        #self.msg_if.pub_info("Got Soft Limits: " + str([adj_pan_min,adj_pan_max,adj_tilt_min,adj_tilt_max]), log_name_list = self.log_name_list)
-        if (pan_deg > adj_pan_max):
-            pan_deg = adj_pan_max
-        if (pan_deg < adj_pan_min):
-            pan_deg = adj_pan_min
-        if (tilt_deg > adj_tilt_max):
-            tilt_deg = adj_tilt_max
-        if (tilt_deg < adj_tilt_min):
-            tilt_deg = adj_tilt_min
+    def getPositionConditioned(self, deg):
+        # Clamp the commanded value against the current soft limits (the trust
+        # boundary: a bad goto is clamped here, never passed raw to hardware).
+        [adj_min,adj_max] = self.getLimitsSoftstopAdj()
+        if (deg > adj_max):
+            deg = adj_max
+        if (deg < adj_min):
+            deg = adj_min
 
         place = self.move_decimal_place
-        pan_deg = nepi_utils.get_sign(pan_deg) * (math.floor( abs(pan_deg * 10**(place)) ) / 10**(place))
-        tilt_deg = nepi_utils.get_sign(tilt_deg) * (math.floor( abs(tilt_deg * 10**(place)) ) / 10**(place))
-        return pan_deg,tilt_deg
+        deg = nepi_utils.get_sign(deg) * (math.floor( abs(deg * 10**(place)) ) / 10**(place))
+        return deg
 
 
 
- 
-    def _setSoftstopCb(self, msg):
-        min_pan = msg.min_pan_deg
-        max_pan = msg.max_pan_deg
-        min_tilt = msg.min_tilt_deg
-        max_tilt = msg.max_tilt_deg
+    def _setSoftLimitsCb(self, msg):
+        min_deg = msg.min_deg
+        max_deg = msg.max_deg
 
-        [min_pan_adj,max_pan_adj,min_tilt_adj,max_tilt_adj] = self.getLimitsAdj(min_pan,max_pan,min_tilt,max_tilt)
+        [min_adj,max_adj] = self.getLimitsAdj(min_deg,max_deg)
 
         valid = False
-        if min_pan_adj >= self.min_pan_hardstop_deg and max_pan_adj <= self.max_pan_hardstop_deg and min_pan_adj < max_pan_adj:  
-            if min_tilt_adj >= self.min_tilt_hardstop_deg and max_tilt_adj <= self.max_tilt_hardstop_deg and min_tilt_adj < max_tilt_adj:
-                if abs(max_pan_adj - min_pan_adj) >= self.MIN_LIMIT_ANGLE and abs(max_tilt_adj - min_tilt_adj) >= self.MIN_LIMIT_ANGLE:
-                    valid = True
-
-                    self.min_pan_softstop_deg =  min_pan_adj
-                    self.max_pan_softstop_deg = max_pan_adj
-                    self.min_tilt_softstop_deg = min_tilt_adj
-                    self.max_tilt_softstop_deg = max_tilt_adj
-
-                    if None not in [min_pan_adj,max_pan_adj,min_tilt_adj,max_tilt_adj]:
-                        if self.setSoftLimitsCb is not None:
-                            self.setSoftLimitsCb(min_pan_adj,max_pan_adj,min_tilt_adj,max_tilt_adj)
-
-                        self.node_if.set_param('max_pan_softstop_deg', max_pan_adj)
-                        self.node_if.set_param('min_pan_softstop_deg', min_pan_adj)
-                        self.node_if.set_param('max_tilt_softstop_deg', max_tilt_adj)
-                        self.node_if.set_param('min_tilt_softstop_deg', min_tilt_adj)
-
+        if min_adj >= self.min_hardstop_deg and max_adj <= self.max_hardstop_deg and min_adj < max_adj:
+            if abs(max_adj - min_adj) >= self.MIN_LIMIT_ANGLE:
+                valid = True
+                self.min_softstop_deg = min_adj
+                self.max_softstop_deg = max_adj
+                if self.setSoftLimitsCb is not None:
+                    self.setSoftLimitsCb(min_adj,max_adj)
+                if self.node_if is not None:
+                    self.node_if.set_param('max_softstop_deg', max_adj)
+                    self.node_if.set_param('min_softstop_deg', min_adj)
 
         if valid == False:
             self.msg_if.pub_warn("Invalid softstop requested " + str(msg))
-        
-  
+        self.publish_status()
+
+
     def _stopMovingCb(self, _):
-        self.msg_if.pub_warn("Got Stop Moving All msg")
-        self.stopServo('All')
+        self.msg_if.pub_warn("Got Stop Moving msg")
+        self.stopServo()
 
-    def _stopPanCb(self, _):
-        self.msg_if.pub_warn("Got Stop Moving Pan msg")
-        self.stopServo('pan')
-
-    def _stopTiltCb(self, _):
-        self.msg_if.pub_warn("Got Stop Moving Tilt msg")
-        self.stopServo('tilt')
-
-    def stopServo(self,axis = 'All'):
-        self.msg_if.pub_warn("Stopping Move for axis: " + str(axis))
-        if axis == 'pan' or axis == 'All':
-            self.stopPanCb()
-            pan_stop_deg = self.status_msg.pan_now_deg * self.rpi
-        else:
-            pan_stop_deg = self.status_msg.pan_goal_deg * self.rpi
-        if axis == 'tilt' or axis == 'All':
-            self.stopTiltCb()
-            tilt_stop_deg = self.status_msg.tilt_now_deg * self.rpi
-        else:
-            tilt_stop_deg = self.status_msg.tilt_goal_deg * self.rpi
-
+    def stopServo(self):
         self.msg_if.pub_info("Stopping motion by request", log_name_list = self.log_name_list)
         if self.stopMovingCb is not None:
             self.stopMovingCb()
         elif self.gotoPositionCb is not None:
-            self.gotoPositionCb(pan_stop_deg,tilt_stop_deg)
+            stop_deg = self.status_msg.position_now_deg * self.ri
+            self.gotoPositionCb(stop_deg)
         self.publish_status()
 
 
-
     def _setMaxSpeedCb(self, msg):
-            max_speed = msg.data
-            if (max_speed > 0.0):
-                
-                if self.setSpeedMaxCb is not None:
-                    self.setSpeedMaxCb(max_speed) 
-                    self.speed_max_dps = max_speed
-                self.publish_status()
+        max_speed = msg.data
+        if (max_speed > 0.0):
+            if self.setSpeedMaxCb is not None:
+                self.setSpeedMaxCb(max_speed)
+                self.speed_max_dps = max_speed
+            if self.node_if is not None:
                 self.node_if.set_param('speed_max_dps',max_speed)
-                self.msg_if.pub_warn("Updated max speed to " + str(max_speed))
+            self.msg_if.pub_info("Updated max speed to " + str(max_speed))
+            self.publish_status()
 
     def _setSpeedRatioCb(self, msg):
         ratio = nepi_utils.check_ratio(msg.data)
         self._setSpeedRatio(ratio)
 
     def _setSpeedRatio(self,speed_ratio):
-        if self.caps_report.has_adjustable_speed == True:
-            speed_cur = math.floor(self.getSpeedRatioCb())
-            
-            self.msg_if.pub_warn("new speed ratio " + "%.2f" % speed_ratio)
-            self.msg_if.pub_warn("cur speed ratio " + "%.2f" % speed_cur)
-
+        if self.has_adjustable_speed == True:
             self.speed_ratio = speed_ratio
-            self.speed_pan_ratio = speed_ratio
-            self.speed_tilt_ratio = speed_ratio
-            self.publish_status()
-            
             self.setSpeedRatioCb(speed_ratio)
-            self.node_if.set_param('speed_ratios',[speed_ratio,speed_ratio])
-    
-        
+            if self.node_if is not None:
+                self.node_if.set_param('speed_ratio',speed_ratio)
+            self.publish_status()
 
-    def _setPanSpeedRatioCb(self, msg):
-        ratio = nepi_utils.check_ratio(msg.data)
-        self._setPanSpeedRatio(ratio)
-
-    def _setPanSpeedRatio(self,speed_ratio):
-        if self.caps_report.has_seperate_servo_speed == True:
-            speed_cur = math.floor(self.getPanSpeedRatioCb())
-            if speed_cur != speed_ratio and self.setPanSpeedRatioCb is not None:
-                self.speed_pan_ratio = speed_ratio
-                self.setPanSpeedRatioCb(speed_ratio)
-                self.speed_ratio = max([speed_ratio,self.speed_tilt_ratio])
-                self.node_if.set_param('speed_ratios', [speed_ratio,self.speed_tilt_ratio])
-                self.publish_status()
-           
-
-    def _setTiltSpeedRatioCb(self, msg):
-        ratio = nepi_utils.check_ratio(msg.data)
-        self._setTiltSpeedRatio(ratio)
-
-    def _setTiltSpeedRatio(self,speed_ratio):
-        if self.caps_report.has_seperate_servo_speed == True:
-            speed_cur = math.floor(self.getTiltSpeedRatioCb())
-            if speed_cur != speed_ratio and self.setTiltSpeedRatioCb is not None:
-                self.speed_tilt_ratio = speed_ratio
-                self.setTiltSpeedRatioCb(speed_ratio)
-                self.speed_ratio = max([self.speed_pan_ratio,speed_ratio])
-                self.node_if.set_param('speed_ratios', [self.speed_pan_ratio,speed_ratio])
-                self.publish_status()
 
     def _setHomePositionCb(self, msg):
-        [pan_deg_adj,tilt_deg_adj] = self.getServoAdj(msg.pan_deg, msg.tilt_deg)
-        if not self.positionWithinSoftLimits(pan_deg_adj, tilt_deg_adj):
+        deg_adj = self.getPosAdj(msg.data)
+        if not self.positionWithinSoftLimits(deg_adj):
             self.msg_if.pub_warn("Requested home position is invalid... ignoring", log_name_list = self.log_name_list)
             return
-
-        self.home_pan_deg = pan_deg_adj
-        self.home_tilt_deg = tilt_deg_adj
-        self.msg_if.pub_info("Updated home position to " + "%.2f" % self.home_pan_deg + " " + "%.2f" %  self.home_tilt_deg)
-        self.publish_status()
+        self.home_pos_deg = deg_adj
+        self.msg_if.pub_info("Updated home position to " + "%.2f" % self.home_pos_deg)
+        if self.node_if is not None:
+            self.node_if.set_param('home_position/deg', deg_adj)
         if self.setHomePositionCb is not None:
-            # Driver supports absolute positioning, so just let it operate
-            self.setHomePositionCb(self.home_pan_deg, self.home_tilt_deg)
-        else:
-            self.msg_if.pub_warn("Absolution position home setpoints not available... ignoring", log_name_list = self.log_name_list)
-            return
-        
-        
-            
+            self.setHomePositionCb(self.home_pos_deg)
+        self.publish_status()
+
 
     def _goHomeCb(self, _):
         self.msg_if.pub_warn("Got Go Home msg")
-        self.stopPanCb()
-        self.stopTiltCb()
         self.goHome()
 
     def goHome(self):
         if self.gotoPositionCb is not None:
-            self.pan_goal_deg = self.home_pan_deg
-            self.tilt_goal_deg = self.home_tilt_deg
-            self.gotoPositionCb(self.pan_goal_deg,self.tilt_goal_deg)
+            self.position_goal_deg = self.home_pos_deg
+            self.gotoPositionCb(self.position_goal_deg)
             self.publish_status()
         elif self.goHomeCb is not None:
             self.goHomeCb()
-        
+
 
     def _gotoPositionCb(self, msg):
-        #self.msg_if.pub_warn("Got goto position msg: " + str(msg))
-        [pan_deg_adj,tilt_deg_adj] = self.getServoAdj(msg.pan_deg,msg.tilt_deg)
-        self.gotPosition(pan_deg_adj,tilt_deg_adj)
+        deg_adj = self.getPosAdj(msg.data)
+        self.gotoPosition(deg_adj)
 
-    def gotPosition(self,pan_deg,tilt_deg):
-            [pan_deg,tilt_deg] = self.getPositionConditioned(pan_deg, tilt_deg)
-            self.pan_goal_deg = pan_deg
-            self.tilt_goal_deg = tilt_deg
-            #self.msg_if.pub_info("Driving to Servo deg position  " + "%.2f" % (pan_deg * self.rpi) + " " + "%.2f" % (tilt_deg * self.rti))
-            self.gotoPositionCb(pan_deg, tilt_deg)
-            self.publish_status()
-
-    def _gotoPanPositionCb(self, msg):
-        #self.msg_if.pub_warn("Got goto pan position msg: " + str(msg))
-        pan_deg_adj = self.getPanAdj(msg.data)
-        self.gotoPanPosition(pan_deg_adj)
-
-    def gotoPanPosition(self,pan_deg):
-        [pan_deg,tilt_deg] = self.getPositionConditioned(pan_deg, self.tilt_goal_deg)
-        self.pan_goal_deg = pan_deg
-        if self.gotoPanPositionCb is not None:
-            #self.msg_if.pub_info("Driving to pan deg" + "%.2f" % (pan_deg * self.rpi))
-            self.gotoPanPositionCb(self.pan_goal_deg)
-        elif self.gotoPositionCb is not None:
-            #self.msg_if.pub_info("Driving to servo deg " + "%.2f" % pan_deg * self.rpi + " " + "%.2f" % tilt_deg * self.rti)
-            self.gotoPositionCb(pan_deg, tilt_deg)
+    def gotoPosition(self,deg):
+        if self.gotoPositionCb is None:
+            return
+        deg = self.getPositionConditioned(deg)
+        self.position_goal_deg = deg
+        self.gotoPositionCb(deg)
         self.publish_status()
-                 
 
-    def _gotoTiltPositionCb(self, msg):
-        #self.msg_if.pub_warn("Got goto tilt position msg: " + str(msg))
-        tilt_deg_adj = self.getTiltAdj(msg.data)
-        #self.msg_if.pub_warn("Got adj goto tilt position msg: " + str(tilt_deg_adj))
-        self.gotoTiltPosition(tilt_deg_adj)
 
-    def gotoTiltPosition(self,tilt_deg):
-        [pan_deg,tilt_deg] = self.getPositionConditioned(self.pan_goal_deg, tilt_deg)
-        self.tilt_goal_deg = tilt_deg
-        if self.gotoTiltPositionCb is not None:
-            #self.msg_if.pub_info("Driving to tilt deg " + "%.2f" % (tilt_deg * self.rti))
-            self.gotoTiltPositionCb(self.tilt_goal_deg)    
-        elif self.gotoPositionCb is not None:
-            #self.msg_if.pub_info("Driving to servo deg " + "%.2f" % pan_deg * self.rpi + " " + "%.2f" % tilt_deg * self.rti)
-            self.gotoPositionCb(pan_deg, tilt_deg)
-        self.publish_status()
-    
-
-    def _gotoToPanRatioCb(self, msg):
-        self.stopPanCb()
+    def _gotoRatioCb(self, msg):
         ratio = msg.data
         if (ratio < 0.0 or ratio > 1.0):
-            self.msg_if.pub_warn("Invalid pan position ratio " + "%.2f" % ratio)
+            self.msg_if.pub_warn("Invalid position ratio " + "%.2f" % ratio)
             return
-        self.pan_goal_deg = self.panRatioToDeg(ratio) # Function takes care of reverse conversion
-        if self.gotoPanPositionCb is not None:
-            #self.msg_if.pub_info("Driving to pan ratio - pan deg:  " + str(self.pan_goal_deg * self.rpi))
-            self.msg_if.pub_info("Calling gotoPanPositionCb with deg :" + str(self.pan_goal_deg))
-            self.gotoPanPositionCb(self.pan_goal_deg)
-        elif self.gotoPositionCb is not None:
-            tilt_goal_deg = self.getTiltAdj(self.tilt_goal_deg)
-            #self.msg_if.pub_info("Driving to pan ratio - servo deg  " + "%.2f" % self.pan_goal_deg * self.rpi + " " + "%.2f" % self.tilt_goal_deg * self.rti)
-            self.gotoPositionCb(self.pan_goal_deg, tilt_goal_deg)
-        self.publish_status()
-        
-
-    def _gotoToTiltRatioCb(self, msg):
-        self.stopTiltCb()
-        ratio = msg.data
-        if (ratio < 0.0 or ratio > 1.0):
-            self.msg_if.pub_warn("Invalid tilt position ratio " + "%.2f" % ratio)
+        if self.gotoPositionCb is None:
             return
-        self.tilt_goal_deg = self.tiltRatioToDeg(ratio) # Function takes care of reverse conversion
-        if self.gotoTiltPositionCb is not None:
-            #self.msg_if.pub_info("Driving to tilt ratio - tilt deg  " + "%.2f" % self.tilt_goal_deg * self.rti)
-            self.gotoTiltPositionCb(self.tilt_goal_deg)
-        elif self.gotoPositionCb is not None:
-            
-
-            self.pan_goal_deg = self.getPanAdj(self.status_msg.pan_now_deg)
-            #self.msg_if.pub_info("Driving to tilt ratio - servo deg  " + "%.2f" % self.pan_goal_deg * self.rpi + " " + "%.2f" % self.tilt_goal_deg * self.rti)
-            self.gotoPositionCb(self.pan_goal_deg, self.tilt_goal_deg)
-        self.publish_status()
-        
-
-    def _jogTimedPanCb(self, msg):
-        #self.stopPanCb()
-        #self.msg_if.pub_warn("Got job pan msg: " + str(msg))
-        if self.movePanCb is not None:
-            self.pan_goal_deg = -999
-            direction = msg.direction * self.rpi
-            time_s = msg.duration_s
-            self.movePanCb(direction,  time_s)
-            #self.msg_if.pub_info("Jogging pan", log_name_list = self.log_name_list)
-        self.publish_status()
-        
-
-    def _jogTimedTiltCb(self, msg):
-        #self.stopTiltCb()
-        #self.msg_if.pub_warn("Got job tilt msg: " + str(msg))
-        if self.moveTiltCb is not None:
-            self.tilt_goal_deg = -999
-            direction = msg.direction * self.rti
-            time_s = msg.duration_s
-            self.moveTiltCb(direction, time_s)
-            #self.msg_if.pub_info("Jogging tilt", log_name_list = self.log_name_list)
+        self.position_goal_deg = self.ratioToDeg(ratio) # Function takes care of reverse conversion
+        self.position_goal_deg = self.getPositionConditioned(self.position_goal_deg)
+        self.gotoPositionCb(self.position_goal_deg)
         self.publish_status()
 
-    def _jogTimedPanSpeedRatioCb(self, msg):
-        #self.stopPanCb()
-        #self.msg_if.pub_warn("Got job pan msg: " + str(msg))
-        if self.movePanSpeedRatioCb is not None:
-            self.pan_goal_deg = -999
-            direction = msg.direction * self.rpi
-            speed_ratio = nepi_utils.check_ratio(msg.speed_ratio)
-            time_s = msg.duration_s
-            self.movePanSpeedRatioCb(direction, speed_ratio, time_s)
-            #self.msg_if.pub_info("Jogging pan", log_name_list = self.log_name_list)
-        self.publish_status()
-        
 
-    def _jogTimedTiltSpeedRatioCb(self, msg):
-        #self.stopTiltCb()
-        #self.msg_if.pub_warn("Got job tilt msg: " + str(msg))
-        if self.moveTiltSpeedRatioCb is not None:
-            self.tilt_goal_deg = -999
-            direction = msg.direction * self.rti
-            speed_ratio = nepi_utils.check_ratio(msg.speed_ratio)
-            time_s = msg.duration_s
-            self.moveTiltSpeedRatioCb(direction, speed_ratio, time_s)
-            #self.msg_if.pub_info("Jogging tilt at ratio ", log_name_list = self.log_name_list)
+    def _setReverseEnableCb(self, msg):
+        self.reverse_enabled = msg.data
+        self.ri = -1 if msg.data == True else 1
+        if self.node_if is not None:
+            self.node_if.set_param('reverse_enabled', self.reverse_enabled)
+        self.msg_if.pub_info("Set servo control to reverse=" + str(self.reverse_enabled))
         self.publish_status()
-        
 
-    def _setReversePanEnableCb(self, msg):
-        self.reverse_pan_enabled = msg.data
-        rpi = 1
-        if msg.data == True:
-            rpi = -1
-        self.rpi = rpi
-        self.msg_if.pub_info("Set pan control to reverse=" + str(self.reverse_pan_enabled))
-        self.publish_status()
-        
 
-    def _setReverseTiltEnableCb(self, msg):
-        self.reverse_tilt_enabled = msg.data
-        rti = 1
-        if msg.data == True:
-            rti = -1
-        self.rti = rti
-        self.msg_if.pub_info("Set tilt control to reverse=" + str(self.reverse_tilt_enabled))
+    def _setSpinDirectionCb(self, msg):
+        if self.setSpinDirection is None:
+            return
+        spin_direction = 1 if msg.data >= 0 else -1
+        self.spin_direction = spin_direction
+        self.setSpinDirection(spin_direction)
+        if self.node_if is not None:
+            self.node_if.set_param('spin_direction', spin_direction)
+        self.msg_if.pub_info("Set spin direction to " + str(spin_direction))
         self.publish_status()
-        
+
 
     def _setHomePositionHereCb(self, _):
-        self.home_pan_deg = self.status_msg.pan_now_deg * self.rpi
-        self.home_tilt_deg = self.status_msg.tilt_now_deg * self.rti
-        self.msg_if.pub_info("Home positon set to: " + "%.2f" % self.home_pan_deg * self.rpi + " " + "%.2f" % self.home_tilt_deg * self.rti)
-        self.publish_status()
+        self.home_pos_deg = self.status_msg.position_now_deg * self.ri
+        if self.node_if is not None:
+            self.node_if.set_param('home_position/deg', self.home_pos_deg)
+        self.msg_if.pub_info("Home position set to: " + "%.2f" % self.home_pos_deg)
         if self.setHomePositionHereCb is not None:
             self.setHomePositionHereCb()
-          
-    def _calibrateCenterCB(self,msg):
-        if self.calibrateCenterCB is not None:
-            self.calibrateCenterCB()
-
-    def _setMoveDecimalPlaceCb(self, msg):
-        val = msg.data
-        if val < 0:
-            self.msg_if.pub_warn("Invalid move_decimal_place requested: " + str(val))
-            return
-        self.move_decimal_place = val
-        self.node_if.set_param('move_decimal_place', val)
-        self.msg_if.pub_info("Updated move_decimal_place to " + str(val))
-
-    def _setReportDecimalPlaceCb(self, msg):
-        val = msg.data
-        if val < 0:
-            self.msg_if.pub_warn("Invalid report_decimal_place requested: " + str(val))
-            return
-        self.report_decimal_place = val
-        self.node_if.set_param('report_decimal_place', val)
-        self.msg_if.pub_info("Updated report_decimal_place to " + str(val))
-
-    def stopPanCb(self):
-        if self.node_if is not None:
-            self.node_if.publish_pub('stop_pan_callback_pub',Empty())
+        self.publish_status()
 
 
-    def stopTiltCb(self):
-        if self.node_if is not None:
-            self.node_if.publish_pub('stop_tilt_callback_pub',Empty())
+    def _resetDeviceCb(self, _):
+        self.msg_if.pub_warn("Got Reset Device msg")
+        if self.deviceResetCb is not None:
+            self.deviceResetCb()
+        self.initCb(do_updates = True)
+
 
     ### Info callback
     def info_query_callback(self, _):
@@ -1566,27 +907,26 @@ class SVXActuatorIF:
 
         Returns:
             SVXCapabilitiesQueryResponse: Response describing which SVX capabilities
-                are supported, including absolute positioning, timed positioning,
-                separate servo control, position feedback, adjustable speed,
-                limit controls, homing, set-home, and calibration.
+                are supported, including absolute positioning, adjustable speed,
+                limit control, homing, set-home, spin control, goto control, stop
+                control, and the maximum speed in degrees per second.
         """
         return self.caps_report
-    
-  
+
 
 
     def _publishStatusCb(self,timer):
         self.publish_status()
 
 
-
     def publish_status(self, do_updates = False):
         """Builds and publishes the DeviceSVXStatus message to the status topic.
 
-        Reads current servo position from the driver if absolute positioning is
-        available, computes smoothed axis speeds, recalculates ratio and degree fields
-        for current and goal positions against soft-stop limits, then publishes the
-        assembled DeviceSVXStatus message and a NavPoseServo message.
+        Reports position open loop: the current position is taken from the driver's
+        last-commanded value (getPositionCb) when available, otherwise from the last
+        goal held by this interface. Recalculates ratio and degree fields for current
+        and goal positions against soft-stop limits, then publishes the assembled
+        DeviceSVXStatus message.
 
         Args:
             do_updates (bool, optional): Reserved for future use. Defaults to False.
@@ -1594,159 +934,55 @@ class SVXActuatorIF:
         Returns:
             float: Elapsed time in seconds spent building and publishing the status.
         """
-        #self.msg_if.pub_warn("entering Pub_stat msg", throttle_s = 5.0)
         start_time = nepi_utils.get_time()
-        #self.msg_if.pub_info("Entering Publish Status", log_name_list = self.log_name_list)
-        if self.has_absolute_positioning == True and self.getPositionCb is not None:
-            
-            
-            cur_time = nepi_utils.get_time()
-            last_time = copy.deepcopy(self.pan_last_time)
 
-            self.status_msg.move_decimal_place = self.move_decimal_place
-            self.status_msg.report_decimal_place = self.report_decimal_place
+        self.status_msg.move_decimal_place = self.move_decimal_place
+        self.status_msg.report_decimal_place = self.report_decimal_place
 
-            [pan_deg ,tilt_deg] = self.getPositionCb()
-            #self.msg_if.pub_warn("Got PT position: " + str(pan_deg) + " : " + str(tilt_deg))
-            
-            if self.getPositionTimesCb is not None:
-                self.position_times = self.getPositionTimesCb()
-                #self.msg_if.pub_warn("Got Position Times: " + str(self.position_times))
-            else:
-                self.position_times = [cur_time,cur_time]
-            #self.msg_if.pub_warn("Using PT position times: " + str(self.position_times))
-            place = self.report_decimal_place
-            pan_deg = nepi_utils.get_sign(pan_deg) * (math.floor( abs(pan_deg * 10**(place)) ) / 10**(place))
-            tilt_deg = nepi_utils.get_sign(tilt_deg) * (math.floor( abs(tilt_deg * 10**(place)) ) / 10**(place))
-            self.current_position = [pan_deg ,tilt_deg]
-            #self.msg_if.pub_warn("Checking for time change: " + str([self.position_times[0],self.pan_time_history[-1]]))
-            if self.position_times[0] != self.pan_time_history[-1]:
-                self.pan_pos_history.append(pan_deg)
-                self.pan_time_history.append(self.position_times[0])
-                if len(self.pan_pos_history) > self.SPEED_SMOOTHING_WINDOW:
-                    self.pan_pos_history.pop(0)
-                    self.pan_time_history.pop(0)
-                if len(self.pan_pos_history) >= 2:
-                    #self.msg_if.pub_warn("Getting Pan Speed from pos: " + str(self.pan_pos_history))
-                    #self.msg_if.pub_warn("Getting Pan Speed from times: " + str(self.pan_time_history))
-                    speeds = []
-                    for i in range(len(self.pan_pos_history) - 1):
-                        delta_time = self.pan_time_history[i+1] - self.pan_time_history[i]
-                        speed = (self.pan_pos_history[i+1] - self.pan_pos_history[i]) / delta_time
-                        speeds.append(speed)
-                    self.speed_pan_dps = sum(speeds) / len(speeds)
-                    #self.msg_if.pub_warn("Got Pan Speed: " + str(self.speed_pan_dps))
+        # Open loop: last commanded value is the position. getPositionCb returns
+        # the last sent position; if not provided, fall back to our held goal.
+        if self.getPositionCb is not None:
+            deg = self.getPositionCb()
+        else:
+            deg = self.position_goal_deg * self.ri
+        place = self.report_decimal_place
+        deg = nepi_utils.get_sign(deg) * (math.floor( abs(deg * 10**(place)) ) / 10**(place))
+        self.position_now_deg = deg
 
-            if self.position_times[1] != self.tilt_time_history[-1]:
-                self.tilt_pos_history.append(tilt_deg)
-                self.tilt_time_history.append(self.position_times[1])
-                if len(self.tilt_pos_history) > self.SPEED_SMOOTHING_WINDOW:
-                    self.tilt_pos_history.pop(0)
-                    self.tilt_time_history.pop(0)
-                if len(self.tilt_pos_history) >= 2:
-                    speeds = []
-                    for i in range(len(self.tilt_pos_history) - 1):
-                        delta_time = self.tilt_time_history[i+1] - self.tilt_time_history[i]
-                        speed = (self.tilt_pos_history[i+1] - self.tilt_pos_history[i]) / delta_time
-                        speeds.append(speed)
-                    self.speed_tilt_dps = sum(speeds) / len(speeds)
+        now_deg_adj = self.getPosAdj(deg)
+        self.status_msg.position_now_deg = now_deg_adj
 
-            #self.msg_if.pub_warn("Using PT position: " + str(self.current_position[0]) + " : " + str(self.current_position[1]))
+        goal_deg_adj = self.getPosAdj(self.position_goal_deg)
+        self.status_msg.position_goal_deg = goal_deg_adj
+        self.status_msg.home_pos_deg = self.getPosAdj(self.home_pos_deg)
 
-            self.status_msg.speed_pan_dps = abs(self.speed_pan_dps)
-            self.status_msg.speed_tilt_dps = abs(self.speed_tilt_dps)
+        [adj_ss_min,adj_ss_max] = self.getLimitsSoftstopAdj()
+        self.status_msg.min_softstop_deg = adj_ss_min
+        self.status_msg.max_softstop_deg = adj_ss_max
 
+        span = (adj_ss_max - adj_ss_min)
+        if span != 0:
+            self.status_msg.position_now_ratio = 1 - (now_deg_adj - adj_ss_min) / span
+            self.status_msg.position_goal_ratio = 1 - (goal_deg_adj - adj_ss_min) / span
+        else:
+            self.status_msg.position_now_ratio = 0.5
+            self.status_msg.position_goal_ratio = 0.5
 
-            pan_now_deg_adj = self.getPanAdj(pan_deg)
-            self.status_msg.pan_now_deg = pan_now_deg_adj
+        self.status_msg.reverse_enabled = self.reverse_enabled
 
-            if self.pan_goal_deg == -999:
-                pan_goal = pan_now_deg_adj
-            else:
-                pan_goal = self.getPanAdj(self.pan_goal_deg)
-            pan_goal_deg_adj = pan_goal
-            self.status_msg.pan_goal_deg = pan_goal_deg_adj
-            self.status_msg.pan_home_pos_deg = self.getPanAdj(self.home_pan_deg)
+        if self.getSpinDirection is not None:
+            self.spin_direction = self.getSpinDirection()
+        self.status_msg.spin_direction = self.spin_direction
+        self.status_msg.is_spinning = self.is_spinning
 
-            tilt_now_deg_adj = self.getTiltAdj(tilt_deg)
-            self.status_msg.tilt_now_deg = tilt_now_deg_adj
-
-            if self.tilt_goal_deg == -999:
-                tilt_goal = tilt_now_deg_adj
-            else:
-                tilt_goal = self.getTiltAdj(self.tilt_goal_deg)
-            tilt_goal_deg_adj = tilt_goal
-            self.status_msg.tilt_goal_deg = tilt_goal_deg_adj
-            self.status_msg.tilt_home_pos_deg = self.getTiltAdj(self.home_tilt_deg)
-
-
-            [adj_pan_hs_min,adj_pan_hs_max,adj_tilt_hs_min,adj_tilt_hs_max] = self.getLimitsHardstopAdj()
-            [adj_pan_ss_min,adj_pan_ss_max,adj_tilt_ss_min,adj_tilt_ss_max] = self.getLimitsSoftstopAdj()
-
-            self.status_msg.pan_min_hardstop_deg = adj_pan_hs_min
-            self.status_msg.pan_max_hardstop_deg = adj_pan_hs_max
-            self.status_msg.pan_min_softstop_deg = adj_pan_ss_min
-            self.status_msg.pan_max_softstop_deg = adj_pan_ss_max
-
-            self.status_msg.tilt_min_hardstop_deg = adj_tilt_hs_min
-            self.status_msg.tilt_max_hardstop_deg = adj_tilt_hs_max
-            self.status_msg.tilt_min_softstop_deg = adj_tilt_ss_min
-            self.status_msg.tilt_max_softstop_deg = adj_tilt_ss_max
-            
-
-            axis_info = [pan_now_deg_adj,pan_goal_deg_adj,adj_pan_ss_min,adj_pan_ss_max]
-            #self.msg_if.pub_warn("Using Pan now,goal,min,max: " + str(axis_info), log_name_list = self.log_name_list, throttle_s = 2.0)        
-            pan_now_ratio_adj =  1 - (pan_now_deg_adj - adj_pan_ss_min) / (adj_pan_ss_max - adj_pan_ss_min) 
-            self.status_msg.pan_now_ratio = pan_now_ratio_adj
-            pan_goal_ratio_adj =  1 - (pan_goal_deg_adj - adj_pan_ss_min) / (adj_pan_ss_max - adj_pan_ss_min)
-            self.status_msg.pan_goal_ratio = pan_goal_ratio_adj
-
-            axis_info = [tilt_now_deg_adj,tilt_goal_deg_adj,adj_tilt_ss_min,adj_tilt_ss_max]
-            #self.msg_if.pub_warn("Using Tilt now,goal,min,max: " + str(axis_info), log_name_list = self.log_name_list, throttle_s = 2.0)    
-            tilt_now_ratio_adj =  1 - (tilt_now_deg_adj - adj_tilt_ss_min) / (adj_tilt_ss_max - adj_tilt_ss_min) 
-            self.status_msg.tilt_now_ratio = tilt_now_ratio_adj
-            tilt_goal_ratio_adj =  1 - (tilt_goal_deg_adj - adj_tilt_ss_min) / (adj_tilt_ss_max - adj_tilt_ss_min)
-            self.status_msg.tilt_goal_ratio = tilt_goal_ratio_adj
-
-            pan_changed = self.last_position[0] != self.current_position[0]
-            tilt_changed = self.last_position[1] != self.current_position[1]
-
-            self.pan_last_time = copy.deepcopy(cur_time)
-            self.last_position = copy.deepcopy(self.current_position)
-
-            self.status_msg.is_moving = pan_changed or tilt_changed
-
-
-        self.status_msg.reverse_pan_enabled = self.reverse_pan_enabled
-        self.status_msg.reverse_tilt_enabled = self.reverse_tilt_enabled
-
+        if self.getSpeedRatioCb is not None:
+            self.speed_ratio = self.getSpeedRatioCb()
         self.status_msg.speed_max_dps = self.speed_max_dps
         self.status_msg.speed_ratio = self.speed_ratio
-        self.status_msg.has_seperate_servo_speed = self.has_seperate_servo_speed
-        self.status_msg.speed_pan_ratio = self.speed_pan_ratio
-        self.status_msg.speed_tilt_ratio = self.speed_tilt_ratio
 
 
         if self.node_if is not None:
-            #self.msg_if.pub_warn("Created status msg: " + str(self.status_msg), throttle_s = 5.0)
-            #self.msg_if.pub_debug("Publishing Status", log_name_list = self.log_name_list)
             self.node_if.publish_pub('status_pub',self.status_msg)
-            servo_msg = NavPoseServo()
-            servo_msg.timestamp = nepi_utils.get_time()
-            servo_msg.pan_deg = self.status_msg.pan_now_deg
-            servo_msg.tilt_deg = self.status_msg.tilt_now_deg
-            self.node_if.publish_pub('servo_pub',servo_msg)
-
 
         pub_time = nepi_utils.get_time() - start_time
         return pub_time
-
-    def getZeroCb(self):
-        return 0
-
-
-
-
-    def passFunction(self):
-        return 0
-

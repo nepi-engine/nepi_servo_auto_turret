@@ -5,7 +5,7 @@
 # This file is part of nepi applications (nepi_drivers) repo
 # (see https://https://github.com/nepi-engine/nepi_drivers)
 #
-# License: nepi applications are licensed under the "Numurus Software License", 
+# License: nepi applications are licensed under the "Numurus Software License",
 # which can be found at: <https://numurus.com/wp-content/uploads/Numurus-Software-License-Terms.pdf>
 #
 # Redistributions in source code must retain this top-level comment bstab.
@@ -15,9 +15,18 @@
 # ====================
 # - mailto:nepi@numurus.com
 
+# SVX (servo) generic discovery.
+# One SVX device = one servo.
+#
+# STUB: The servo-controller board is not yet chosen (Pololu Maestro vs. ESP32).
+# This discovery keeps the standardized NEPI discovery signature and three-tier
+# structure so it merges into nepi_drivers unchanged. The actual device detection
+# (matching the chosen board's USB serial path token, or VID/PID) is the
+# developer's next task -- see TODO in checkForDevice() below. No serial or USB
+# library is imported here on purpose; add it with the board driver.
+
 
 import os
-import subprocess
 import time
 
 from nepi_sdk import nepi_sdk
@@ -25,10 +34,10 @@ from nepi_sdk import nepi_utils
 from nepi_sdk import nepi_drvs
 from nepi_sdk import nepi_system
 
-PKG_NAME = 'SVX_IQR' 
+PKG_NAME = 'SVX_SERVO_GENERIC'
 FILE_TYPE = 'DISCOVERY'
 
-class IqrServoDiscovery:
+class SvxServoGenericDiscovery:
 
   NODE_LOAD_TIME_SEC = 10
   launch_time_dict = dict()
@@ -37,19 +46,19 @@ class IqrServoDiscovery:
 
 
   active_devices_dict = dict()
-  node_launch_name = "iqr_servo"
+  node_launch_name = "svx_servo"
 
   dont_retry_list = []
 
-  includeDevices = ['iqr_servo']
+  # TODO: replace this placeholder path token with the chosen board's serial path
+  # token (e.g. a udev-named symlink for the Pololu Maestro or ESP32) once the
+  # hardware is selected. Until then no real device will match and no node launches.
+  includeDevices = ['svx_servo']
   excludedDevices = ['ttyACM']
 
 
-  baud_str = '115200'
-  addr_str = '1'
-
   source_path = 'None'
-  ################################################          
+  ################################################
   def __init__(self):
     ############
     # Create Message Logger
@@ -61,17 +70,15 @@ class IqrServoDiscovery:
 
 
 
- 
+
   ##########  DRV Standard Discovery Function
   ### Function to try and connect to device and also monitor and clean up previously connected devices
   def discoveryFunction(self,available_paths_list, active_paths_list,base_namespace, drv_dict, retry_enabled = True):
     self.drv_dict = drv_dict
-    #self.logger.log_warn("Got drv_dict : " + str(self.drv_dict))
-    #self.logger.log_warn("Got available paths list : " + str(available_paths_list))
     self.available_paths_list = available_paths_list
     self.active_paths_list = active_paths_list
     self.base_namespace = base_namespace
-    
+
     ##################################
     # Get required data from drv_dict
 
@@ -87,7 +94,7 @@ class IqrServoDiscovery:
     for path_str in self.active_devices_dict.keys():
         success = self.checkOnDevice(path_str)
         if success == False:
-          path_purge_list.append(path_str) 
+          path_purge_list.append(path_str)
     # Clean up the active_devices_dict
     for path_str in path_purge_list:
       del  self.active_devices_dict[path_str]
@@ -110,8 +117,11 @@ class IqrServoDiscovery:
   ##########  Device specific calls
 
   def checkForDevice(self,path_str):
+    # TODO: implement real board detection for the chosen servo controller.
+    # For the Pololu Maestro or ESP32 this will match the board's USB serial path
+    # (and optionally probe VID/PID or perform a handshake). Placeholder token match:
     for included_device in self.includeDevices:
-      found_device = path_str.find(included_device) != -1 
+      found_device = path_str.find(included_device) != -1
       if found_device:
         return True
     return False
@@ -144,7 +154,6 @@ class IqrServoDiscovery:
     success = False
     launch_id = path_str
 
-    node_launch_name = 'iqr_servo_'
     self.logger.log_warn("Entering launch device function for path: " + str(path_str) )###
     file_name = self.drv_dict['NODE_DICT']['file_name']
     device_name = self.node_launch_name
@@ -152,19 +161,17 @@ class IqrServoDiscovery:
     self.logger.log_warn(" launching node: " + node_name)
 
 
-
     #Setup required param server drv_dict for discovery node
     dict_param_name = nepi_sdk.create_namespace(self.base_namespace,node_name + "/drv_dict")
     self.drv_dict['DEVICE_DICT']={'device_name': device_name}
-    self.source_path = '/dev/' + os.readlink(path_str)
+    # TODO: resolve and record the real device path for the chosen board here.
+    self.source_path = path_str
     self.drv_dict['DEVICE_DICT']['device_path'] = self.source_path
-    self.drv_dict['DEVICE_DICT']['baud_str'] = self.baud_str
-    self.drv_dict['DEVICE_DICT']['addr_str'] = self.addr_str
     nepi_sdk.set_param(dict_param_name,self.drv_dict)
 
     [success, msg, sub_process] = nepi_drvs.launchDriverNode(file_name, node_name)
 
-    # Process luanch results
+    # Process launch results
     self.launch_time_dict[launch_id] = nepi_sdk.get_time()
     if success:
       self.logger.log_info("Launched node: " + node_name)
@@ -177,18 +184,16 @@ class IqrServoDiscovery:
     return success
 
   def killAllDevices(self,active_paths_list):
-    #self.logger.log_warn("Entering Kill All Devices function for path: " + str(path_str))###
     path_purge_list = []
     for key in self.active_devices_dict.keys():
       path_purge_list.append(key)
-    #self.logger.log_warn("Killing Devices: " + str(path_purge_list))
     for path_str in path_purge_list:
         path_entry = self.active_devices_dict[path_str]
         node_name = path_entry['node_name']
         sub_process = path_entry['sub_process']
         if self.retry == False:
           self.logger.log_warn("Will not try relaunch for node: " + node_name)
-          self.dont_retry_list.append(path_str)        
+          self.dont_retry_list.append(path_str)
         success = nepi_drvs.killDriverNode(node_name,sub_process)
         if path_str in active_paths_list:
           active_paths_list.remove(path_str)
@@ -202,12 +207,4 @@ class IqrServoDiscovery:
 
 
 if __name__ == '__main__':
-    IqrServoDiscovery()
-
-    
-
-
-        
-      
-
- 
+    SvxServoGenericDiscovery()

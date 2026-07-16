@@ -1,0 +1,16 @@
+driver:
+  pkg_name: SVX_SERVO_GENERIC
+  display_name: Generic Servo
+  description: Generic single-servo SVX driver stub (board-agnostic; no pulse-width or serial I/O implemented yet)
+  type: SVX
+  group_id: None
+  NODE_DICT:
+    file_name: svx_servo_generic_node.py
+    class_name: SvxServoGenericNode
+  DRIVER_DICT:
+    file_name: None
+    class_name: None
+  DISCOVERY_DICT:
+    file_name: svx_servo_generic_discovery.py
+    class_name: SvxServoGenericDiscovery
+    process: CALL

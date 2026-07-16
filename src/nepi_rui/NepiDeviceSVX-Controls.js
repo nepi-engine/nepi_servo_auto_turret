@@ -6,7 +6,7 @@
 # (see https://github.com/nepi-engine/nepi_rui)
 #
 # License: NEPI RUI repo source-code and NEPI Images that use this source-code
-# are licensed under the "Numurus Software License", 
+# are licensed under the "Numurus Software License",
 # which can be found at: <https://numurus.com/wp-content/uploads/Numurus-Software-License-Terms.pdf>
 #
 # Redistributions in source code must retain this top-level comment block.
@@ -17,19 +17,24 @@
 # - mailto:nepi@numurus.com
 #
  */
+
+// SVX (servo) controls panel.
+// One SVX device = one servo. Controls are drawn conditionally on the Figure 4
+// capability flags reported by the device. All field/topic names match the
+// DeviceSVXStatus msg (Figure 3), SVXCapabilitiesQuery srv (Figure 4), and the
+// Figure 5 control topics. Editable inputs follow the authoritative RUI pattern.
+
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 import Toggle from "react-toggle"
 
 import Section from "./Section"
-import Select, { Option } from "./Select"
 import { Columns, Column } from "./Columns"
 import { SliderAdjustment } from "./AdjustmentWidgets"
 import Label from "./Label"
 import Input from "./Input"
 import Styles from "./Styles"
 import Button, { ButtonMenu } from "./Button"
-//import BooleanIndicator from "./BooleanIndicator"
 
 import {setElementStyleModified, clearElementStyleModified, onChangeSwitchStateValue, round} from "./Utilities"
 
@@ -44,30 +49,21 @@ class NepiDeviceSVXControls extends Component {
     super(props)
 
     this.state = {
-      
+
       namespace : null,
       status_msg: null,
 
       speedMax: 0.0,
-      linkSpeeds: false,
 
       show_controls: false,
 
-      panHomePos : null,
-      tiltHomePos : null,
-      panHardStopMin : null,
-      tiltHardStopMin : null,
-      panHardStopMax : null,
-      tiltHardStopMax : null,
-      panSoftStopMin : null,
-      tiltSoftStopMin : null,
-      panSoftStopMax : null,
-      tiltSoftStopMax : null,
-      moveDecimalPlace : null,
-      reportDecimalPlace : null,
+      homePos : null,
+      softStopMin : null,
+      softStopMax : null,
+      gotoPos : null,
 
       statusListener: null,
-  
+
     }
 
 
@@ -76,34 +72,24 @@ class NepiDeviceSVXControls extends Component {
 
     this.renderControlPanel = this.renderControlPanel.bind(this)
     this.renderDeviceIF = this.renderDeviceIF.bind(this)
-    
 
     this.updateStatusListener = this.updateStatusListener.bind(this)
     this.statusListener = this.statusListener.bind(this)
   }
 
 
-  // Callback for handling ROS Status3DX messages
+  // Callback for handling ROS DeviceSVXStatus messages
   statusListener(message) {
     const last_status_msg = this.state.status_msg
     this.setState({
       status_msg: message
     })
 
-
-
     const speedMax = message.speed_max_dps
-    const panHomePos = message.pan_home_pos_deg
-    const tiltHomePos = message.tilt_home_pos_deg
-    const panHardStopMin = message.pan_min_hardstop_deg
-    const tiltHardStopMin = message.tilt_min_hardstop_deg
-    const panHardStopMax = message.pan_max_hardstop_deg
-    const tiltHardStopMax = message.tilt_max_hardstop_deg
-    const panSoftStopMin = message.pan_min_softstop_deg
-    const tiltSoftStopMin = message.tilt_min_softstop_deg
-    const panSoftStopMax = message.pan_max_softstop_deg
-    const tiltSoftStopMax = message.tilt_max_softstop_deg
-    
+    const homePos = message.home_pos_deg
+    const softStopMin = message.min_softstop_deg
+    const softStopMax = message.max_softstop_deg
+
     var needs_update = false
     if (last_status_msg == null){
       needs_update = true
@@ -111,59 +97,32 @@ class NepiDeviceSVXControls extends Component {
     else {
        needs_update = (
           speedMax !== last_status_msg.speed_max_dps ||
-          panHomePos !== last_status_msg.pan_home_pos_deg  ||
-          tiltHomePos !== last_status_msg.tilt_home_pos_deg  ||
-          panHardStopMin !== last_status_msg.pan_min_hardstop_deg  ||
-          tiltHardStopMin !== last_status_msg.tilt_min_hardstop_deg  ||
-          panHardStopMax !== last_status_msg.pan_max_hardstop_deg  ||
-          tiltHardStopMax !== last_status_msg.tilt_max_hardstop_deg  ||
-          panSoftStopMin !== last_status_msg.pan_min_softstop_deg  ||
-          tiltSoftStopMin !== last_status_msg.tilt_min_softstop_deg  ||
-          panSoftStopMax !== last_status_msg.pan_max_softstop_deg  ||
-          tiltSoftStopMax !== last_status_msg.tilt_max_softstop_deg  ||
-          message.move_decimal_place !== last_status_msg.move_decimal_place  ||
-          message.report_decimal_place !== last_status_msg.report_decimal_place
+          homePos !== last_status_msg.home_pos_deg ||
+          softStopMin !== last_status_msg.min_softstop_deg ||
+          softStopMax !== last_status_msg.max_softstop_deg
       )
     }
     if (needs_update === true){
-      this.setState({ })
       this.setState({
           speedMax: speedMax,
-          panHomePos : round(message.pan_home_pos_deg, 1),
-          tiltHomePos : round(message.tilt_home_pos_deg, 1),
-          panHardStopMin : round(message.pan_min_hardstop_deg, 1),
-          tiltHardStopMin : round(message.tilt_min_hardstop_deg, 1),
-          panHardStopMax : round(message.pan_max_hardstop_deg, 1),
-          tiltHardStopMax : round(message.tilt_max_hardstop_deg, 1),
-          panSoftStopMin : round(message.pan_min_softstop_deg, 1),
-          tiltSoftStopMin : round(message.tilt_min_softstop_deg, 1),
-          panSoftStopMax : round(message.pan_max_softstop_deg, 1),
-          tiltSoftStopMax : round(message.tilt_max_softstop_deg, 1),
-          moveDecimalPlace : message.move_decimal_place,
-          reportDecimalPlace : message.report_decimal_place
+          homePos : round(message.home_pos_deg, 1),
+          softStopMin : round(message.min_softstop_deg, 1),
+          softStopMax : round(message.max_softstop_deg, 1)
       })
     }
 
   }
-  
+
   // Function for configuring and subscribing to Status
   updateStatusListener() {
     const namespace = (this.props.namespace !== undefined) ? this.props.namespace : null
     if (this.state.statusListener != null) {
       this.state.statusListener.unsubscribe()
        this.setState({ status_msg: null, statusListener: null})
-      this.setState({panHomePos : null,
-                    tiltHomePos : null,
-                    panHardStopMin : null,
-                    tiltHardStopMin : null,
-                    panHardStopMax : null,
-                    tiltHardStopMax : null,
-                    panSoftStopMin : null,
-                    tiltSoftStopMin : null,
-                    panSoftStopMax : null,
-                    tiltSoftStopMax : null,
-                    moveDecimalPlace : null,
-                    reportDecimalPlace : null
+      this.setState({homePos : null,
+                    softStopMin : null,
+                    softStopMax : null,
+                    gotoPos : null
       })
     }
     if (namespace != null && namespace !== 'None'){
@@ -176,8 +135,8 @@ class NepiDeviceSVXControls extends Component {
     this.setState({ namespace: namespace})
 
 }
-  
-// Lifecycle method called when compnent updates.
+
+// Lifecycle method called when component updates.
 // Used to track changes in the topic
 componentDidUpdate(prevProps, prevState, snapshot) {
   const namespace = (this.props.namespace !== undefined) ? this.props.namespace : null
@@ -191,10 +150,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     }
 
 
-
-
-  // Lifecycle method called just before the component umounts.
-  // Used to unsubscribe to Status3DX message
+  // Lifecycle method called just before the component unmounts.
   componentWillUnmount() {
     if (this.state.statusListener) {
       this.state.statusListener.unsubscribe()
@@ -203,628 +159,274 @@ componentDidUpdate(prevProps, prevState, snapshot) {
   }
 
 
-
   onUpdateText(e) {
-    var speedMax = null
-    var panElement = null
-    var tiltElement = null
-    var panMinElement = null
-    var panMaxElement = null
-    var tiltMinElement = null
-    var tiltMaxElement = null
-    if ((e.target.id === "MaxSpeed") )
+    if (e.target.id === "SVXSoftStopMin")
     {
-      speedMax = document.getElementById("MaxSpeed")
-      setElementStyleModified(speedMax)
+      const el = document.getElementById("SVXSoftStopMin")
+      setElementStyleModified(el)
+      this.setState({softStopMin: e.target.value})
+    }
+    else if (e.target.id === "SVXSoftStopMax")
+    {
+      const el = document.getElementById("SVXSoftStopMax")
+      setElementStyleModified(el)
+      this.setState({softStopMax: e.target.value})
+    }
+    else if (e.target.id === "SVXHomePos")
+    {
+      const el = document.getElementById("SVXHomePos")
+      setElementStyleModified(el)
+      this.setState({homePos: e.target.value})
+    }
+    else if (e.target.id === "SVXGoto")
+    {
+      const el = document.getElementById("SVXGoto")
+      setElementStyleModified(el)
+      this.setState({gotoPos: e.target.value})
+    }
+    else if (e.target.id === "SVXMaxSpeed")
+    {
+      const el = document.getElementById("SVXMaxSpeed")
+      setElementStyleModified(el)
       this.setState({speedMax: e.target.value})
     }
-    else if ((e.target.id === "SVXPanHomePos") )
-    {
-      panElement = document.getElementById("SVXPanHomePos")
-      setElementStyleModified(panElement)
-      this.setState({panHomePos: e.target.value})
-    }
-    else if ((e.target.id === "SVXTiltHomePos"))
-    {      
-      tiltElement = document.getElementById("SVXTiltHomePos")
-      setElementStyleModified(tiltElement)
-      this.setState({tiltHomePos: e.target.value})
-
-    }
-    else if ((e.target.id === "SVXPanSoftStopMin"))
-    {
-      panMinElement = document.getElementById("SVXPanSoftStopMin")
-      setElementStyleModified(panMinElement)
-      this.setState({panSoftStopMin: e.target.value})
-    }
-    else if ((e.target.id === "SVXPanSoftStopMax"))
-    {
-      panMaxElement = document.getElementById("SVXPanSoftStopMax")
-      setElementStyleModified(panMaxElement)
-      this.setState({panSoftStopMax: e.target.value})
-    }
-    else if ((e.target.id === "SVXTiltSoftStopMin"))
-    {
-      tiltMinElement = document.getElementById("SVXTiltSoftStopMin")
-      setElementStyleModified(tiltMinElement)
-      this.setState({tiltSoftStopMin: e.target.value})
-    }
-    else if ((e.target.id === "SVXTiltSoftStopMax"))
-    {
-      tiltMaxElement = document.getElementById("SVXTiltSoftStopMax")
-      setElementStyleModified(tiltMaxElement)
-      this.setState({tiltSoftStopMax: e.target.value})
-
-    }
-    else if (e.target.id === "SVXPanGoto") 
-      {
-        panElement = document.getElementById("SVXPanGoto")
-        setElementStyleModified(panElement)
-        this.setState({panGoto: e.target.value})
-             
-      }
-        
-    else if  (e.target.id === "SVXTiltGoto")
-        {
-          tiltElement = document.getElementById("SVXTiltGoto")
-          setElementStyleModified(tiltElement)
-          this.setState({tiltGoto: e.target.value})         
-          
-        }
-
-    else if (e.target.id === "SVXPanGoto") 
-      {
-        panElement = document.getElementById("SVXPanGoto")
-        setElementStyleModified(panElement)
-        this.setState({panGoto: e.target.value})
-             
-      }
-        
-    else if  (e.target.id === "SVXTiltGoto")
-        {
-          tiltElement = document.getElementById("SVXTiltGoto")
-          setElementStyleModified(tiltElement)
-          this.setState({tiltGoto: e.target.value})
-
-        }
-
-    else if (e.target.id === "SVXMoveDecimalPlace")
-    {
-      const el = document.getElementById("SVXMoveDecimalPlace")
-      setElementStyleModified(el)
-      this.setState({moveDecimalPlace: e.target.value})
-    }
-    else if (e.target.id === "SVXReportDecimalPlace")
-    {
-      const el = document.getElementById("SVXReportDecimalPlace")
-      setElementStyleModified(el)
-      this.setState({reportDecimalPlace: e.target.value})
-    }
-
   }
 
   onKeyText(e) {
-    const {svxDevices, onSetSVXGotoPos, onSetSVXGotoPanPos, onSetSVXGotoTiltPos, onSetSVXHomePos, onSetSVXSoftStopPos, sendFloatMsg, sendIntMsg} = this.props.ros
+    const { sendFloatMsg } = this.props.ros
     const namespace = (this.props.namespace !== undefined) ? this.props.namespace : 'None'
 
-    const devicesList = Object.keys(svxDevices)
-    var has_sep_servo = false
-    if (devicesList.indexOf(namespace) !== -1){
-      const capabilities = svxDevices[namespace]
-      has_sep_servo = capabilities && (capabilities.has_seperate_servo_control === true)
-    }
-    var speedMax = null
-    var panElement = null
-    var tiltElement = null
-    var panMinElement = null
-    var panMaxElement = null
-    var tiltMinElement = null
-    var tiltMaxElement = null
     if(e.key === 'Enter'){
 
-      if ((e.target.id === "MaxSpeed") )
+      if ((e.target.id === "SVXSoftStopMin") || (e.target.id === "SVXSoftStopMax"))
       {
-        speedMax = document.getElementById("MaxSpeed")
-        clearElementStyleModified(speedMax)
-        sendFloatMsg(namespace + '/set_speed_max_dps', speedMax.value)
+        const minEl = document.getElementById("SVXSoftStopMin")
+        const maxEl = document.getElementById("SVXSoftStopMax")
+        clearElementStyleModified(minEl)
+        clearElementStyleModified(maxEl)
+        // set_soft_limits control: ServoLimits msg {min_deg, max_deg}
+        this.props.ros.publishMessage({
+          name: namespace + "/set_soft_limits",
+          messageType: "nepi_interfaces/ServoLimits",
+          data: {"min_deg": Number(minEl.value), "max_deg": Number(maxEl.value)},
+          noPrefix: true
+        })
       }
-      else if ((e.target.id === "SVXPanHomePos") || (e.target.id === "SVXTiltHomePos"))
+      else if (e.target.id === "SVXHomePos")
       {
-        panElement = document.getElementById("SVXPanHomePos")
-        clearElementStyleModified(panElement)
-        
-        tiltElement = document.getElementById("SVXTiltHomePos")
-        clearElementStyleModified(tiltElement)
-                
-        onSetSVXHomePos(namespace, Number(panElement.value), Number(tiltElement.value))
-
-      }
-      else if ((e.target.id === "SVXPanSoftStopMin") || (e.target.id === "SVXPanSoftStopMax") ||
-               (e.target.id === "SVXTiltSoftStopMin") || (e.target.id === "SVXTiltSoftStopMax"))
-      {
-        panMinElement = document.getElementById("SVXPanSoftStopMin")
-        clearElementStyleModified(panMinElement)
-
-        panMaxElement = document.getElementById("SVXPanSoftStopMax")
-        clearElementStyleModified(panMaxElement)
-
-        tiltMinElement = document.getElementById("SVXTiltSoftStopMin")
-        clearElementStyleModified(tiltMinElement)
-
-        tiltMaxElement = document.getElementById("SVXTiltSoftStopMax")
-        clearElementStyleModified(tiltMaxElement)
-
-        onSetSVXSoftStopPos(namespace, Number(panMinElement.value), Number(panMaxElement.value), 
-                            Number(tiltMinElement.value), Number(tiltMaxElement.value))
-      }
-      else if (e.target.id === "SVXPanGoto") 
-      {
-        panElement = document.getElementById("SVXPanGoto")
-        tiltElement = document.getElementById("SVXTiltGoto")                    
-        if (has_sep_servo === true){
-          onSetSVXGotoPanPos(namespace, Number(panElement.value))
-        }
-        else {
-          onSetSVXGotoPos(namespace, Number(panElement.value),Number(tiltElement.value))
-        }            
-        clearElementStyleModified(panElement)   
-        this.setState({panGoto: null})    
-        
-      }
-      else if  (e.target.id === "SVXTiltGoto")
-        {
-          
-          panElement = document.getElementById("SVXPanGoto")
-          tiltElement = document.getElementById("SVXTiltGoto")
-
-          if (has_sep_servo === true){
-            onSetSVXGotoTiltPos(namespace, Number(tiltElement.value))
-          }
-          else {
-            onSetSVXGotoPos(namespace, Number(panElement.value),Number(tiltElement.value))
-          }              
-          clearElementStyleModified(tiltElement)
-          this.setState({tiltGoto: null})      
-          
-        }
-
-      else if (e.target.id === "SVXPanGoto") 
-      {
-        panElement = document.getElementById("SVXPanGoto")
-        tiltElement = document.getElementById("SVXTiltGoto")                    
-        if (has_sep_servo === true){
-          onSetSVXGotoPanPos(namespace, Number(panElement.value))
-        }
-        else {
-          onSetSVXGotoPos(namespace, Number(panElement.value),Number(tiltElement.value))
-        }            
-        clearElementStyleModified(panElement)   
-        this.setState({panGoto: null})    
-        
-      }
-      else if  (e.target.id === "SVXTiltGoto")
-        {
-
-          panElement = document.getElementById("SVXPanGoto")
-          tiltElement = document.getElementById("SVXTiltGoto")
-
-          if (has_sep_servo === true){
-            onSetSVXGotoTiltPos(namespace, Number(tiltElement.value))
-          }
-          else {
-            onSetSVXGotoPos(namespace, Number(panElement.value),Number(tiltElement.value))
-          }
-          clearElementStyleModified(tiltElement)
-          this.setState({tiltGoto: null})
-
-        }
-
-      else if (e.target.id === "SVXMoveDecimalPlace")
-      {
-        const el = document.getElementById("SVXMoveDecimalPlace")
+        const el = document.getElementById("SVXHomePos")
         clearElementStyleModified(el)
-        sendIntMsg(namespace + "/set_move_decimal_place", Number(el.value))
+        sendFloatMsg(namespace + "/set_home_position", el.value)
       }
-      else if (e.target.id === "SVXReportDecimalPlace")
+      else if (e.target.id === "SVXGoto")
       {
-        const el = document.getElementById("SVXReportDecimalPlace")
+        const el = document.getElementById("SVXGoto")
         clearElementStyleModified(el)
-        sendIntMsg(namespace + "/set_report_decimal_place", Number(el.value))
+        sendFloatMsg(namespace + "/goto_position", el.value)
+        this.setState({gotoPos: null})
       }
-
+      else if (e.target.id === "SVXMaxSpeed")
+      {
+        const el = document.getElementById("SVXMaxSpeed")
+        clearElementStyleModified(el)
+        sendFloatMsg(namespace + "/set_speed_max_dps", el.value)
+      }
     }
   }
-
-
 
 
   renderControlPanel() {
 
-    const {sendBoolMsg, onSVXSetHomeHere } = this.props.ros
+    const { sendBoolMsg, sendTriggerMsg } = this.props.ros
     const namespace = this.props.namespace ? this.props.namespace : 'None'
     const status_msg = this.state.status_msg
 
     const devices = this.props.ros.svxDevices
-    var has_abs_pos = false
-    var has_speed_control = false
+    var has_limit_control = false
     var has_homing = false
-    var has_sep_speed = false
+    var has_set_home = false
     const devicesList = Object.keys(devices)
     if (devicesList.indexOf(namespace) !== -1){
       const capabilities = devices[namespace]
-      has_abs_pos = capabilities && (capabilities.has_absolute_positioning === true)
-      has_speed_control = capabilities && (capabilities.has_adjustable_speed)
-      has_homing = capabilities && (capabilities.has_homing)
-      has_sep_speed = capabilities && (capabilities.has_seperate_servo_speed === true)
+      has_limit_control = capabilities && (capabilities.has_limit_control === true)
+      has_homing = capabilities && (capabilities.has_homing === true)
+      has_set_home = capabilities && (capabilities.has_set_home === true)
     }
 
-    const reversePanEnabled = status_msg.reverse_pan_enabled
-    const reverseTiltEnabled = status_msg.reverse_tilt_enabled
+    const reverseEnabled = status_msg.reverse_enabled
 
-    const speedRatio = status_msg.speed_ratio
-    const speedPanRatio = status_msg.speed_pan_ratio
-    const speedTiltRatio = status_msg.speed_tilt_ratio
-
-    const panHomePos = this.state.panHomePos
-    const tiltHomePos = this.state.tiltHomePos
-    const panHardStopMin = this.state.panHardStopMin
-    const tiltHardStopMin = this.state.tiltHardStopMin
-    const panHardStopMax = this.state.panHardStopMax
-    const tiltHardStopMax = this.state.tiltHardStopMax
-    const panSoftStopMin = this.state.panSoftStopMin
-    const tiltSoftStopMin = this.state.tiltSoftStopMin
-    const panSoftStopMax = this.state.panSoftStopMax
-    const tiltSoftStopMax = this.state.tiltSoftStopMax   
-
-
-
-    const { userRestricted} = this.props.ros
-    const device_controls_restricted = userRestricted.indexOf('DEVICE-NPX-CONTROL') !== -1
+    const softStopMin = this.state.softStopMin
+    const softStopMax = this.state.softStopMax
+    const homePos = this.state.homePos
 
     const show_controls =  this.state.show_controls
 
+    return (
+      <React.Fragment>
 
+            <Columns>
+              <Column>
 
-    if ( device_controls_restricted === true){
-              <Columns>
+                  <Label title="Show Controls">
+                      <Toggle
+                        checked={show_controls===true}
+                        onClick={() => onChangeSwitchStateValue.bind(this)("show_controls",show_controls)}>
+                      </Toggle>
+                  </Label>
+
+                </Column>
                 <Column>
 
                 </Column>
               </Columns>
 
-    }
 
-    else {
-      return (
-        <React.Fragment>
+              <div hidden={(show_controls===false)}>
 
+              <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
 
-              <Columns>
-                <Column>
-
-
-                    <Label title="Show Controls">
-                        <Toggle
-                          checked={show_controls===true}
-                          onClick={() => onChangeSwitchStateValue.bind(this)("show_controls",show_controls)}>
-                        </Toggle>
+                    <Label title={"Reverse Control"}>
+                      <Toggle checked={reverseEnabled} onClick={() => sendBoolMsg.bind(this)(namespace + "/set_reverse_enable",!reverseEnabled)} />
                     </Label>
 
 
-                  </Column>
-                  <Column>
+                    <div hidden={(has_limit_control === false)}>
 
-                  </Column>
-                </Columns>
+                            <Label title={"Soft Limit Min"}>
+                              <Input
+                                disabled={!has_limit_control}
+                                id={"SVXSoftStopMin"}
+                                style={{ width: "45%", float: "left" }}
+                                value={softStopMin}
+                                onChange= {this.onUpdateText}
+                                onKeyDown= {this.onKeyText}
+                              />
+                            </Label>
+                            <Label title={"Soft Limit Max"}>
+                              <Input
+                                disabled={!has_limit_control}
+                                id={"SVXSoftStopMax"}
+                                style={{ width: "45%", float: "left" }}
+                                value={softStopMax}
+                                onChange= {this.onUpdateText}
+                                onKeyDown= {this.onKeyText}
+                              />
+                            </Label>
 
-
-
-                <div hidden={(show_controls===false)}>
-
-
-
-
-
-
-                <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
-
-   
-  
-                        <Label title={""}>
-                          <div style={{ display: "inline-block", width: "45%", float: "left" }}>{"Pan"}</div>
-                          <div style={{ display: "inline-block", width: "45%", float: "left" }}>{"Tilt"}</div>
-                        </Label>
-
-                          <Label title={"Reverse Control"}>
-                            <div style={{ display: "inline-block", width: "45%", float: "left" }}>
-                              <Toggle style={{justifyContent: "flex-left"}} checked={reversePanEnabled} onClick={() => sendBoolMsg.bind(this)(namespace + "/set_reverse_pan_enable",!reversePanEnabled)} />
-                            </div>
-                            <div style={{ display: "inline-block", width: "45%", float: "right" }}>
-                              <Toggle style={{justifyContent: "flex-right"}} checked={reverseTiltEnabled} onClick={() => sendBoolMsg.bind(this)(namespace + "/set_reverse_tilt_enable",!reverseTiltEnabled)} />
-                            </div>
-                          </Label>
+                    </div>
 
 
+                    <div hidden={(has_homing === false)}>
 
+                    <Label title={"Home Position"}>
+                      <Input
+                        disabled={!has_homing}
+                        id={"SVXHomePos"}
+                        style={{ width: "45%", float: "left" }}
+                        value={homePos}
+                        onChange= {this.onUpdateText}
+                        onKeyDown= {this.onKeyText}
+                      />
+                    </Label>
 
-                        <div hidden={(has_abs_pos === false)}>
-
-                                <Label title={"Hard Limit Min"}>
-                                  <Input
-                                    disabled={true}
-                                    id={"SVXPanHardStopMin"}
-                                    style={{ width: "45%", float: "left" }}
-                                    value={panHardStopMin}
-                                  />
-                                  <Input
-                                    disabled={true}
-                                    id={"SVXTiltHardStopMin"}
-                                    style={{ width: "45%" }}
-                                    value={tiltHardStopMin}
-                                  />
-                                </Label>
-
-                                <Label title={"Hard Limit Max"}>
-                                  <Input
-                                    disabled={true}
-                                    id={"SVXPanHardStopMax"}
-                                    style={{ width: "45%", float: "left" }}
-                                    value={panHardStopMax}
-                                  />
-                                  <Input
-                                    disabled={true}
-                                    id={"SVXTiltHardStopMax"}
-                                    style={{ width: "45%" }}
-                                    value={tiltHardStopMax}
-                                  />
-                                </Label>
-
-
-                                <Label title={"Soft Limit Min"}>
-                                  <Input
-                                    disabled={!has_abs_pos}
-                                    id={"SVXPanSoftStopMin"}
-                                    style={{ width: "45%", float: "left" }}
-                                    value={panSoftStopMin}
-                                    onChange= {this.onUpdateText}
-                                    onKeyDown= {this.onKeyText}
-                                  />
-                                  <Input
-                                    disabled={!has_abs_pos}
-                                    id={"SVXTiltSoftStopMin"}
-                                    style={{ width: "45%" }}
-                                    value={tiltSoftStopMin}
-                                    onChange= {this.onUpdateText}
-                                    onKeyDown= {this.onKeyText}
-                                  />
-                                </Label>
-                                <Label title={"Soft Limit Max"}>
-                                  <Input
-                                    disabled={!has_abs_pos}
-                                    id={"SVXPanSoftStopMax"}
-                                    style={{ width: "45%", float: "left" }}
-                                    value={panSoftStopMax}
-                                    onChange= {this.onUpdateText}
-                                    onKeyDown= {this.onKeyText}
-                                  />
-                                  <Input
-                                    disabled={!has_abs_pos}
-                                    id={"SVXTiltSoftStopMax"}
-                                    style={{ width: "45%" }}
-                                    value={tiltSoftStopMax}
-                                    onChange= {this.onUpdateText}
-                                    onKeyDown= {this.onKeyText}
-                                  />
-                                </Label>
-
-                        </div>
-
-
-                        <div hidden={(has_homing === false)}>
-
-                        <Label title={"Home Position"}>
-                          <Input
-                            disabled={!has_homing}
-                            id={"SVXPanHomePos"}
-                            style={{ width: "45%", float: "left" }}
-                            value={panHomePos}
-                            onChange= {this.onUpdateText}
-                            onKeyDown= {this.onKeyText}
-                          />
-                          <Input
-                            disabled={!has_homing}
-                            id={"SVXTiltHomePos"}
-                            style={{ width: "45%" }}
-                            value={tiltHomePos}
-                            onChange= {this.onUpdateText}
-                            onKeyDown= {this.onKeyText}
-                          />
-                        </Label>
-
-
-                        <ButtonMenu>
-
-                          <Button disabled={!has_homing} onClick={() => onSVXSetHomeHere(namespace)}>{"Set Home Here"}</Button>
-                        </ButtonMenu>
-
-                      </div>
-
-                      <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
-
-                      <Label title={"Move Decimal Place"}>
-                        <Input
-                          id={"SVXMoveDecimalPlace"}
-                          style={{ width: "45%", float: "left" }}
-                          value={this.state.moveDecimalPlace}
-                          onChange={this.onUpdateText}
-                          onKeyDown={this.onKeyText}
-                        />
-                      </Label>
-
-                      <Label title={"Report Decimal Place"}>
-                        <Input
-                          id={"SVXReportDecimalPlace"}
-                          style={{ width: "45%", float: "left" }}
-                          value={this.state.reportDecimalPlace}
-                          onChange={this.onUpdateText}
-                          onKeyDown={this.onKeyText}
-                        />
-                      </Label>
-
+                    <ButtonMenu>
+                      <Button disabled={!has_set_home} onClick={() => sendTriggerMsg(namespace + "/set_home_position_here")}>{"Set Home Here"}</Button>
+                    </ButtonMenu>
 
                   </div>
 
 
-          </React.Fragment>
-        )
-    }
+                  <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
+
+                  <ButtonMenu>
+                    <Button onClick={() => sendTriggerMsg(namespace + "/reset_device")}>{"Reset Device"}</Button>
+                  </ButtonMenu>
+
+              </div>
+
+
+        </React.Fragment>
+      )
   }
 
- 
+
   renderDeviceIF() {
-    const { onSVXGoHome,onSVXStop} = this.props.ros
+    const { sendTriggerMsg, sendIntMsg } = this.props.ros
     const namespace = (this.props.namespace !== undefined) ? this.props.namespace : null
     const status_msg = this.state.status_msg
 
     const devices = this.props.ros.svxDevices
     var has_abs_pos = false
+    var has_goto_control = false
     var has_speed_control = false
+    var has_stop_control = false
+    var has_spin_control = false
     var has_homing = false
-    var has_sep_speed = false
     const devicesList = Object.keys(devices)
     if (devicesList.indexOf(namespace) !== -1){
       const capabilities = devices[namespace]
       has_abs_pos = capabilities && (capabilities.has_absolute_positioning === true)
-      has_homing = capabilities && (capabilities.has_homing)
-      has_speed_control = capabilities && (capabilities.has_adjustable_speed)
-      has_sep_speed = capabilities && (capabilities.has_seperate_servo_speed === true)
+      has_goto_control = capabilities && (capabilities.has_goto_control === true)
+      has_speed_control = capabilities && (capabilities.has_adjustable_speed === true)
+      has_stop_control = capabilities && (capabilities.has_stop_control === true)
+      has_spin_control = capabilities && (capabilities.has_spin_control === true)
+      has_homing = capabilities && (capabilities.has_homing === true)
     }
 
-     const panPosition = status_msg.pan_now_deg
-    const tiltPosition = status_msg.tilt_now_deg
-
-    const panPositionClean = panPosition + .001
-    const tiltPositionClean = tiltPosition + .001
-
-    const panMove = status_msg.pan_goal_deg
-    const tiltMove = status_msg.tilt_goal_deg
-
-    const panMoveClean = panMove + .001
-    const tiltMoveClean = tiltMove + .001
-
+    const position_now = status_msg.position_now_deg
+    const position_goal = status_msg.position_goal_deg
+    const positionNowClean = position_now + .001
+    const positionGoalClean = position_goal + .001
 
     const speedRatio = status_msg.speed_ratio
-    const speedPanRatio = status_msg.speed_pan_ratio
-    const speedTiltRatio = status_msg.speed_tilt_ratio
+    const spinDirection = status_msg.spin_direction
 
-    const speed_pan_dps = status_msg.speed_pan_dps
-    const speed_tilt_dps = status_msg.speed_tilt_dps
-   
-      
-      return (
-        <React.Fragment>
-
-
-              {/* <label style={{fontWeight: 'bold'}} align={"left"} textAlign={"left"}>
-                {"PT STATE - Angles in ENU frame (Tilt+:Down , Pan+:Left)"}
-              </label> */}
-
-          { (has_homing === false) ?
-
+    return (
+      <React.Fragment>
 
           <ButtonMenu>
-            <Button onClick={() => onSVXStop(namespace)}>{"STOP"}</Button>
+            <Button disabled={!has_stop_control} onClick={() => sendTriggerMsg(namespace + "/stop_moving")}>{"STOP"}</Button>
+            <Button disabled={!has_homing} onClick={() => sendTriggerMsg(namespace + "/go_home")}>{"GO HOME"}</Button>
           </ButtonMenu>
 
-          :
 
-          <ButtonMenu>
-            <Button onClick={() => onSVXStop(namespace)}>{"STOP"}</Button>
-            <Button disabled={!has_homing} onClick={() => onSVXGoHome(namespace)}>{"GO HOME"}</Button>
-          </ButtonMenu>
+          <div hidden={(has_goto_control === false && has_abs_pos === false)}>
 
-          }
-
-
-          <div hidden={(has_abs_pos === false)}>
-
-          <Label title={""} style={{fontWeight: 'bold'}} align={"left"} textAlign={"left"}>
-            <div style={{ display: "inline-block", width: "45%", float: "left" }}>{"Pan"}</div>
-            <div style={{ display: "inline-block", width: "45%", float: "left" }}>{"Tilt"}</div>
-          </Label>
-
-              <Label title={"GoTo Position "}>
+              <Label title={"GoTo Position (deg)"}>
                 <Input
-                  disabled={!has_abs_pos}
-                  id={"SVXPanGoto"}
+                  disabled={!has_goto_control}
+                  id={"SVXGoto"}
                   style={{ width: "45%", float: "left" }}
-                  value={this.state.panGoto}
-                  onChange= {this.onUpdateText}
-                  onKeyDown= {this.onKeyText}
-                />
-                <Input
-                  disabled={!has_abs_pos}
-                  id={"SVXTiltGoto"}
-                  style={{ width: "45%" }}
-                  value={this.state.tiltGoto}
+                  value={this.state.gotoPos}
                   onChange= {this.onUpdateText}
                   onKeyDown= {this.onKeyText}
                 />
               </Label>
-
 
               <Label title={"Current Position"}>
                 <Input
                   disabled
                   style={{ width: "45%", float: "left" }}
-                  value={round(panPositionClean, 2)}
-                />
-                <Input
-                  disabled
-                  style={{ width: "45%" }}
-                  value={round(tiltPositionClean, 2)}
+                  value={round(positionNowClean, 2)}
                 />
               </Label>
 
-              <Label title={"Move Position"}>
+              <Label title={"Goal Position"}>
                 <Input
                   disabled
                   style={{ width: "45%", float: "left" }}
-                  value={round(panMoveClean, 2)}
-                />
-                <Input
-                  disabled
-                  style={{ width: "45%" }}
-                  value={round(tiltMoveClean, 2)}
+                  value={round(positionGoalClean, 2)}
                 />
               </Label>
-
-
 
           </div>
 
 
           <div hidden={(has_speed_control === false)}>
 
-
-
-            <Label title={"Speed (dps)"}>
-              <Input
-                disabled
-                style={{ width: "45%", float: "left" }}
-                value={round(speed_pan_dps, 2)}
-              />
-              <Input
-                disabled
-                style={{ width: "45%" }}
-                value={round(speed_tilt_dps, 2)}
-              />
-            </Label>
-
             <Label title={"Max Speed (dps)"}>
                 <Input
-                  id={"MaxSpeed"}
-                  disabled={true}
+                  id={"SVXMaxSpeed"}
                   style={{ width: "45%" }}
                   value={this.state.speedMax}
                   onChange= {this.onUpdateText}
@@ -832,64 +434,32 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                 />
             </Label>
 
-            {(has_sep_speed === true && this.state.linkSpeeds === false) ? (
-              <React.Fragment>
-                <SliderAdjustment
-                  disabled={!has_speed_control}
-                  title={"Pan Speed"}
-                  msgType={"std_msgs/Float32"}
-                  adjustment={speedPanRatio}
-                  topic={namespace + "/set_pan_speed_ratio"}
-                  scaled={0.01}
-                  min={0}
-                  max={100}
-                  tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                  unit={"%"}
-                />
-                <SliderAdjustment
-                  disabled={!has_speed_control}
-                  title={"Tilt Speed"}
-                  msgType={"std_msgs/Float32"}
-                  adjustment={speedTiltRatio}
-                  topic={namespace + "/set_tilt_speed_ratio"}
-                  scaled={0.01}
-                  min={0}
-                  max={100}
-                  tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                  unit={"%"}
-                />
-              </React.Fragment>
-            ) : (
-              <SliderAdjustment
-                disabled={!has_speed_control}
-                title={"Speed"}
-                msgType={"std_msgs/Float32"}
-                adjustment={speedRatio}
-                topic={namespace + "/set_speed_ratio"}
-                scaled={0.01}
-                min={0}
-                max={100}
-                tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                unit={"%"}
-              />
-            )}
-
-            {(has_sep_speed === true) ?
-            <Columns>
-              <Column></Column>
-              <Column>
-                <Label title="Link Speeds">
-                  <Toggle
-                    checked={this.state.linkSpeeds === true}
-                    onClick={() => onChangeSwitchStateValue.bind(this)("linkSpeeds", this.state.linkSpeeds)}>
-                  </Toggle>
-                </Label>
-              </Column>
-            </Columns>
-            : null }
+            <SliderAdjustment
+              disabled={!has_speed_control}
+              title={"Speed"}
+              msgType={"std_msgs/Float32"}
+              adjustment={speedRatio}
+              topic={namespace + "/set_speed_ratio"}
+              scaled={0.01}
+              min={0}
+              max={100}
+              tooltip={"Speed as a percentage (0%=min, 100%=max)"}
+              unit={"%"}
+            />
 
           </div>
 
+
+          <div hidden={(has_spin_control === false)}>
+
+            <Label title={"Spin Direction"}>
+              <Toggle
+                checked={spinDirection >= 0}
+                onClick={() => sendIntMsg(namespace + "/set_spin_direction", (spinDirection >= 0) ? -1 : 1)}>
+              </Toggle>
+            </Label>
+
+          </div>
 
 
       </React.Fragment>
@@ -908,12 +478,10 @@ componentDidUpdate(prevProps, prevState, snapshot) {
       return (
         <Columns>
         <Column>
-       
+
         </Column>
         </Columns>
       )
-
-
     }
     else if (make_section === false){
 
@@ -923,7 +491,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
               { (status_msg != null) ? this.renderDeviceIF() : null}
               { (status_msg != null && show_controls === true) ? this.renderControlPanel() : null}
-              { (status_msg != null && show_config === true) ?  
+              { (status_msg != null && show_config === true) ?
                 <NepiIFConfig
                 namespace={namespace}
                 show_save_all={true}
@@ -942,7 +510,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
               { (status_msg != null) ? this.renderDeviceIF() : null}
               { (status_msg != null && show_controls === true) ? this.renderControlPanel() : null}
-              { (status_msg != null && show_config === true) ?  
+              { (status_msg != null && show_config === true) ?
                 <NepiIFConfig
                 namespace={namespace}
                 show_save_all={true}

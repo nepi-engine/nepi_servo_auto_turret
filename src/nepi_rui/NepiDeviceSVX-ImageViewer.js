@@ -6,7 +6,7 @@
 # (see https://github.com/nepi-engine/nepi_rui)
 #
 # License: NEPI RUI repo source-code and NEPI Images that use this source-code
-# are licensed under the "Numurus Software License", 
+# are licensed under the "Numurus Software License",
 # which can be found at: <https://numurus.com/wp-content/uploads/Numurus-Software-License-Terms.pdf>
 #
 # Redistributions in source code must retain this top-level comment block.
@@ -17,12 +17,16 @@
 # - mailto:nepi@numurus.com
 #
  */
+
+// SVX (servo) image viewer panel.
+// One SVX device = one servo, so there is a single position slider (goto_ratio)
+// drawn only when the device reports absolute positioning. All field/topic names
+// match the DeviceSVXStatus msg (Figure 3), SVXCapabilitiesQuery srv (Figure 4),
+// and the Figure 5 control topics.
+
 import React, { Component } from "react"
 
-//import moment from "moment"
 import { observer, inject } from "mobx-react"
-
-//import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 import Button, { ButtonMenu } from "./Button"
 
@@ -46,13 +50,9 @@ class NepiDeviceSVXImageViewer extends Component {
       namespace: null,
 
       status_msg: null,
-      statusListener: null,
-
-      jog_speed_ratio: 0.5
+      statusListener: null
     }
 
-
-    //this.renderImageViewer = this.renderImageViewer.bind(this)
 
     this.getNamespace = this.getNamespace.bind(this)
     this.updateStatusListener = this.updateStatusListener.bind(this)
@@ -74,13 +74,13 @@ class NepiDeviceSVXImageViewer extends Component {
     return namespace
   }
 
-  // Callback for handling ROS Status3DX messages
+  // Callback for handling ROS DeviceSVXStatus messages
   statusListener(message) {
     this.setState({
       status_msg: message
     })
   }
-  
+
   // Function for configuring and subscribing to Status
   updateStatusListener() {
     const { namespace } = this.props
@@ -98,8 +98,8 @@ class NepiDeviceSVXImageViewer extends Component {
     this.setState({ namespace: namespace})
 
 }
-  
-// Lifecycle method called when compnent updates.
+
+// Lifecycle method called when component updates.
 // Used to track changes in the topic
 componentDidUpdate(prevProps, prevState, snapshot) {
   const { namespace } = this.props
@@ -113,9 +113,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     }
 
 
-
-  // Lifecycle method called just before the component umounts.
-  // Used to unsubscribe to Status3DX message
+  // Lifecycle method called just before the component unmounts.
   componentWillUnmount() {
     if (this.state.statusListener) {
       this.state.statusListener.unsubscribe()
@@ -127,8 +125,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
 
   render() {
-    const { svxDevices, onSVXJogPan, onSVXJogTilt, onSVXJogSpeedPan, onSVXJogSpeedTilt, onSVXStop, onSVXPanStop, onSVXTiltStop } = this.props.ros
-    const jog_speed_ratio = this.state.jog_speed_ratio
+    const { svxDevices, sendTriggerMsg } = this.props.ros
     const namespace = (this.props.namespace !== null) ? this.props.namespace : 'None'
     const status_msg = this.state.status_msg
 
@@ -139,28 +136,22 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
 
 
-    var panGoalRatio = 0.5
-    var tiltGoalRatio = 0.5
+    var positionGoalRatio = 0.5
     if (status_msg != null){
-      panGoalRatio = status_msg.pan_goal_ratio
-      tiltGoalRatio = status_msg.tilt_goal_ratio
+      positionGoalRatio = status_msg.position_goal_ratio
     }
-   
+
 
     const svxDevicesList = Object.keys(svxDevices)
     var has_abs_pos = false
-    var has_timed_pos = false
-    var has_timed_speed_pos = false
+    var has_stop_control = false
     if (svxDevicesList.indexOf(namespace) !== -1){
       const svx_caps = svxDevices[namespace]
       has_abs_pos = svx_caps && (svx_caps.has_absolute_positioning === true)
-      has_timed_pos = svx_caps && (svx_caps.has_timed_positioning === true)
-      has_timed_speed_pos = svx_caps && (svx_caps.has_timed_speed_positioning === true)
+      has_stop_control = svx_caps && (svx_caps.has_stop_control === true)
     }
 
-    const svxImageViewerElement = document.getElementById("svxImageViewer")
-    const tiltSliderHeight = (svxImageViewerElement)? Math.floor(svxImageViewerElement.offsetHeight * 0.8) : 1
-    const show_sv_controls = (tiltSliderHeight === 1) ? false : (has_abs_pos === true)
+    const show_sv_controls = (has_abs_pos === true)
 
 
     return (
@@ -168,19 +159,19 @@ componentDidUpdate(prevProps, prevState, snapshot) {
         <React.Fragment >
 
         <Columns>
-          <Column equalWidth = {false} >        
+          <Column equalWidth = {false} >
 
           <div id={'svxImageViewer'}>
 
             {(use_images_selector === true) ?
               <NepiIFImageViewersSelector
-                
+
                 hideQualitySelector={true}
                 show_save_controls={show_save_controls}
                 show_image_controls={show_image_controls}
                 mouse_event_topic={mouse_event_topic}
               />
-              : 
+              :
                   <NepiIFImageViewerSelector
                     id={'svxImageViewer'}
                     hideQualitySelector={true}
@@ -194,29 +185,6 @@ componentDidUpdate(prevProps, prevState, snapshot) {
         </div>
 
           </Column>
-          <Column style={{flex: 0.05}}>
-
-           <div hidden={show_sv_controls === false}>
-
-            <SliderAdjustment
-              title={"Tilt"}
-              msgType={"std_msgs/Float32"}
-              adjustment={tiltGoalRatio}
-              topic={namespace + "/goto_tilt_ratio"}
-              scaled={0.01}
-              min={0}
-              max={100}
-              tooltip={"Tilt as a percentage (0%=min, 100%=max)"}
-              unit={"%"}
-              vertical={true}
-              verticalHeight={tiltSliderHeight}
-              noTextBox={true}
-              noLabel={true}
-            />
-
-          </div>
-
-        </Column>
         </Columns>
 
 
@@ -224,80 +192,26 @@ componentDidUpdate(prevProps, prevState, snapshot) {
               <div hidden={show_sv_controls === false}>
 
                   <SliderAdjustment
-                    title={"Pan"}
+                    title={"Position"}
                     msgType={"std_msgs/Float32"}
-                    adjustment={panGoalRatio}
-                    topic={namespace + "/goto_pan_ratio"}
+                    adjustment={positionGoalRatio}
+                    topic={namespace + "/goto_ratio"}
                     scaled={0.01}
                     min={0}
                     max={100}
-                    tooltip={"Pan as a percentage (0%=min, 100%=max)"}
+                    tooltip={"Position as a percentage (0%=min, 100%=max)"}
                     unit={"%"}
                     noTextBox={true}
                     noLabel={true}
                   />
               </div>
 
-              {(has_timed_pos === true) ?
 
-                      <div style={{display: 'flex', alignItems: 'center', width: '100%'}}>
-
-                        {(has_timed_speed_pos === true) &&
-                          <div style={{flex: 1, paddingRight: '8px', display: 'flex', flexDirection: 'column', alignItems: 'stretch'}}>
-                            <span style={{color: 'white', textAlign: 'center', fontSize: '11px', marginBottom: '2px'}}>
-                              {"Jog Speed " + Math.round(jog_speed_ratio * 100) + "%"}
-                            </span>
-                            <input
-                              type="range"
-                              min="1"
-                              max="100"
-                              value={Math.round(jog_speed_ratio * 100)}
-                              onChange={(e) => this.setState({ jog_speed_ratio: e.target.value / 100 })}
-                              style={{width: '100%'}}
-                            />
-                          </div>
-                        }
-
-                        <div style={{flex: 1, display: 'flex', justifyContent: 'center'}}>
-                          <ButtonMenu>
-
-                            <Button
-                              buttonDownAction={() => has_timed_speed_pos ? onSVXJogSpeedPan(namespace,  1, jog_speed_ratio) : onSVXJogPan(namespace,  1)}
-                              buttonUpAction={() => onSVXPanStop(namespace)}>
-                              {'\u25C0'}
-                            </Button>
-                            <Button
-                              buttonDownAction={() => has_timed_speed_pos ? onSVXJogSpeedPan(namespace, -1, jog_speed_ratio) : onSVXJogPan(namespace, -1)}
-                              buttonUpAction={() => onSVXPanStop(namespace)}>
-                              {'\u25B6'}
-                            </Button>
-                            <Button
-                              buttonDownAction={() => has_timed_speed_pos ? onSVXJogSpeedTilt(namespace, -1, jog_speed_ratio) : onSVXJogTilt(namespace, -1)}
-                              buttonUpAction={() => onSVXTiltStop(namespace)}>
-                              {'\u25B2'}
-                            </Button>
-                            <Button
-                              buttonDownAction={() => has_timed_speed_pos ? onSVXJogSpeedTilt(namespace,  1, jog_speed_ratio) : onSVXJogTilt(namespace,  1)}
-                              buttonUpAction={() => onSVXTiltStop(namespace)}>
-                              {'\u25BC'}
-                            </Button>
-
-                            <Button onClick={() => onSVXStop(namespace)}>{"STOP"}</Button>
-
-                          </ButtonMenu>
-                        </div>
-
-                      </div>
-
-                    :
-
-                      <ButtonMenu>
-
-                          <Button onClick={() => onSVXStop(namespace)}>{"STOP"}</Button>
-
-                        </ButtonMenu>
-
-                    }
+              <div hidden={has_stop_control === false}>
+                <ButtonMenu>
+                    <Button onClick={() => sendTriggerMsg(namespace + "/stop_moving")}>{"STOP"}</Button>
+                </ButtonMenu>
+              </div>
 
   </React.Fragment>
 
