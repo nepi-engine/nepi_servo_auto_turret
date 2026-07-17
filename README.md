@@ -29,7 +29,8 @@ so its files drop into the `nepi_engine_ws` submodules (`nepi_interfaces`, `nepi
 | RUI | `src/nepi_rui/NepiDeviceSVX.js` | Device selector panel |
 | | `src/nepi_rui/NepiDeviceSVX-Controls.js` | Control panel (drawn per capability flags) |
 | | `src/nepi_rui/NepiDeviceSVX-ImageViewer.js` | Image viewer + position slider |
-| Driver | `src/nepi_drivers/svx_drivers/svx_servo_generic_*` | Generic single-servo driver **stub** |
+| Driver | `src/nepi_drivers/svx_drivers/svx_servo_maestro_*` | Pololu Micro Maestro single-servo driver (USB serial) |
+| | `src/nepi_drivers/svx_drivers/svx_servo_generic_*` | Board-agnostic single-servo driver **stub** (kept for future boards) |
 
 ## Control topics (subscribed by `SVXActuatorIF`)
 
@@ -55,12 +56,27 @@ is a no-op.
 
 ## Hardware driver status
 
-The servo-controller board is **not yet chosen** (Pololu Maestro vs. ESP32), so
-`svx_drivers/svx_servo_generic_*` ships as a documented single-servo **stub**: it brings
-up the full ROS interface but performs no hardware I/O. Implementing the degree →
-pulse-width conversion and board link (USB serial for the Maestro, or custom ESP32
-firmware) is the developer's next task — see the `TODO(board)` markers in
-`svx_servo_generic_node.py`. No serial/USB dependency is added until the board is chosen.
+The servo-controller board is the **Pololu Micro Maestro 6-Channel USB Servo Controller**.
+Two SVX drivers ship:
+
+- `svx_drivers/svx_servo_maestro_*` — the **working** driver for the Maestro. It talks to
+  the board's USB Command Port over serial (pyserial), converts degrees to servo pulse
+  width (Maestro targets are in quarter-microseconds), and implements the Maestro
+  [serial command set](https://www.pololu.com/docs/0J40/5.e): Set Target, Set Speed, Set
+  Acceleration, Get Position, Get Errors, Go Home. It defaults to the Compact protocol and
+  can use the Pololu protocol (device number) for daisy-chained boards. **One SVX node = one
+  servo = one Maestro channel**; discovery launches one node per configured channel
+  (`channels` option), and channel nodes sharing a board's single USB port serialize access
+  with an advisory `fcntl.flock`, so a pan/tilt turret (two servos on one Maestro) runs as
+  two coexisting nodes.
+
+- `svx_drivers/svx_servo_generic_*` — retained board-agnostic **stub** (no hardware I/O).
+  Kept as the starting point for a future board (e.g. a custom-firmware ESP32); implement
+  the `TODO(board)` callbacks there when that board is chosen.
+
+The Maestro driver is written against the documented protocol but has **not been
+hardware-validated** in this environment (no Maestro attached) — see the validation note in
+`docs/SVX-Category.md`.
 
 See `docs/SVX Requirements.md` for the authoritative API specification and
 `docs/SVX-Category.md` for the category overview.

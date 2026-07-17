@@ -51,18 +51,44 @@ how one interface serves servos with different feature sets.
 
 ## Driver pattern
 
-`svx_drivers/svx_servo_generic_*` follows the standard NEPI three-tier driver pattern:
+Both SVX drivers follow the standard NEPI three-tier driver pattern (discovery + node +
+params yaml). The chosen board is the **Pololu Micro Maestro 6-Channel USB Servo
+Controller**.
 
-- `svx_servo_generic_discovery.py` — standardized `discoveryFunction(...)`; detects the
-  board and launches the node.
-- `svx_servo_generic_node.py` — calls `nepi_sdk.init_node`, reads `~drv_dict`, and
-  registers with `SVXActuatorIF`, providing the hardware callbacks.
-- `svx_servo_generic_params.yaml` — driver metadata (`type: SVX`).
-- `svx_servo_generic_driver.py` — optional raw-I/O layer (not present yet).
+`svx_drivers/svx_servo_maestro_*` — the working Maestro driver:
 
-The hardware callbacks are **stubs**: the servo-controller board is undecided (Pololu
-Maestro vs. ESP32), so degree → pulse-width conversion and board I/O are the developer's
-next task (`TODO(board)` markers in the node). The interface stays board-agnostic.
+- `svx_servo_maestro_discovery.py` — `discoveryFunction(...)` enumerates USB serial ports,
+  matches the Pololu vendor ID (`0x1FFB`) and Maestro product IDs, picks each board's
+  Command Port (lowest USB interface), and launches one node per configured servo
+  `channel`.
+- `svx_servo_maestro_node.py` — reads `~drv_dict`, opens the Command Port with pyserial,
+  and registers with `SVXActuatorIF`. Hardware callbacks convert degrees ↔ pulse width
+  (Maestro targets are in quarter-microseconds) and issue the Maestro
+  [serial commands](https://www.pololu.com/docs/0J40/5.e) (Set Target/Speed/Accel, Get
+  Position/Errors, Go Home). Compact protocol by default; Pololu protocol (device number)
+  for daisy chains. Every serial transaction is wrapped in an in-process lock plus an
+  advisory `fcntl.flock` on the port, so multiple channel nodes can share one board's USB
+  port without interleaving bytes.
+- `svx_servo_maestro_params.yaml` — driver metadata (`type: SVX`) plus discovery OPTIONS:
+  `channels`, `protocol`, `device_number`, `command_port_index`, `baud_rate`,
+  `pulse_min_us`/`pulse_max_us`, `min_deg`/`max_deg`, `accel_units`.
+
+`svx_drivers/svx_servo_generic_*` — retained board-agnostic **stub** (no hardware I/O),
+kept as the starting point for a future board (e.g. a custom-firmware ESP32). Its
+`TODO(board)` callbacks are implemented per-board when that board is chosen.
+
+**Reverse axis:** `SVXActuatorIF` applies the reverse-axis conversion (and soft-limit
+clamping and ratio math) *before* it calls a driver callback, and re-applies it when it
+reads position back. The Maestro driver therefore keeps a single pure linear degree ↔
+pulse-width map with no reverse logic of its own — adding reverse handling in the driver
+would double-invert.
+
+**Validation status:** the Maestro driver is written against the documented protocol but
+has **not** been hardware-validated (no Maestro attached in this environment). Bench
+validation once a board is available: confirm the Command Port is selected (flip
+`command_port_index` if commands get no response), verify `pulse_min_us`/`pulse_max_us`
+against the actual servo travel, and check that a two-channel turret runs as two coexisting
+nodes on one port.
 
 ## Security / trust boundary
 

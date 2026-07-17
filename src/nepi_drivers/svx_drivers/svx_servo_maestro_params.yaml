@@ -1,0 +1,76 @@
+driver:
+  pkg_name: SVX_SERVO_MAESTRO
+  display_name: Pololu Maestro Servo
+  description: Single-servo SVX driver for the Pololu Micro Maestro USB servo controller (one node per servo channel; degrees to pulse-width over USB serial)
+  type: SVX
+  group_id: None
+  NODE_DICT:
+    file_name: svx_servo_maestro_node.py
+    class_name: SvxServoMaestroNode
+  DRIVER_DICT:
+    file_name: None
+    class_name: None
+  DISCOVERY_DICT:
+    file_name: svx_servo_maestro_discovery.py
+    class_name: SvxServoMaestroDiscovery
+    process: CALL
+    OPTIONS:
+      channels:
+        type: 'String'
+        description: 'Comma-separated Maestro channels to expose as servos (e.g. "0" or "0,1"), or "all" for channels 0-5. One SVX node is launched per channel.'
+        default: '0'
+        value: '0'
+      protocol:
+        type: Discrete
+        description: 'Serial command protocol. Compact works for a single controller; Pololu adds a device number for daisy-chained boards.'
+        options:
+          - 'Compact'
+          - 'Pololu'
+        default: 'Compact'
+        value: 'Compact'
+      device_number:
+        type: 'String'
+        description: 'Maestro device number (Pololu protocol only; factory default is 12).'
+        default: '12'
+        value: '12'
+      command_port_index:
+        type: 'String'
+        description: 'Which of a board''s two USB serial ports is the Command Port: 0 = lowest USB interface (default), 1 = the other. Flip if commands get no response.'
+        default: '0'
+        value: '0'
+      baud_rate:
+        type: Discrete
+        description: 'Serial baud rate. Ignored for the USB Command Port (USB is not rate-limited); kept for TTL/UART use.'
+        options:
+          - '9600'
+          - '19200'
+          - '38400'
+          - '57600'
+          - '115200'
+        default: '9600'
+        value: '9600'
+      pulse_min_us:
+        type: 'String'
+        description: 'Servo pulse width (microseconds) at the minimum-degree hardstop.'
+        default: '1000'
+        value: '1000'
+      pulse_max_us:
+        type: 'String'
+        description: 'Servo pulse width (microseconds) at the maximum-degree hardstop.'
+        default: '2000'
+        value: '2000'
+      min_deg:
+        type: 'String'
+        description: 'Degree value that maps to pulse_min_us (minimum hardstop).'
+        default: '-90'
+        value: '-90'
+      max_deg:
+        type: 'String'
+        description: 'Degree value that maps to pulse_max_us (maximum hardstop).'
+        default: '90'
+        value: '90'
+      accel_units:
+        type: 'String'
+        description: 'Maestro acceleration limit in (0.25us)/(10ms)/(80ms) units; 0 = no limit.'
+        default: '0'
+        value: '0'
