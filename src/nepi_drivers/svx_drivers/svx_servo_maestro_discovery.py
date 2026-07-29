@@ -92,7 +92,14 @@ class SvxServoMaestroDiscovery:
         # Get discovery options
         try:
             options = self.drv_dict.get('DISCOVERY_DICT', {}).get('OPTIONS', {})
-            self.channels_list = self.parseChannels(options.get('channels', {}).get('value', '0'))
+            # Hardcoded, not read from the 'channels' OPTIONS value: a persisted param
+            # server override for this option has repeatedly outlived redeploys/rebuilds
+            # on real devices, silently limiting discovery to one stale channel. Always
+            # expose every Micro Maestro channel (0-5) as its own device instead -- the
+            # Maestro has no way to detect which channels have a servo physically wired
+            # (open loop, no feedback wire) anyway, so this is the only reliable way to
+            # guarantee "a device per servo" regardless of device config-persistence state.
+            self.channels_list = list(range(0, 6))
             self.baud_str = str(options.get('baud_rate', {}).get('value', '9600'))
             self.device_number = int(options.get('device_number', {}).get('value', 12))
             self.protocol = str(options.get('protocol', {}).get('value', 'Compact'))
@@ -102,6 +109,17 @@ class SvxServoMaestroDiscovery:
             self.min_deg = float(options.get('min_deg', {}).get('value', -90.0))
             self.max_deg = float(options.get('max_deg', {}).get('value', 90.0))
             self.accel_units = int(options.get('accel_units', {}).get('value', 0))
+
+            # Per-channel calibration: each of these may be a single value (applied
+            # to every channel) or a comma-separated list matched positionally to
+            # channels_list, so e.g. a pan servo and a tilt servo on one board can
+            # each get their own pulse-width/degree range. Embedded per-channel into
+            # each node's own DEVICE_DICT below, not left as one shared OPTIONS value.
+            n = len(self.channels_list)
+            self.pulse_min_us_list = self.parseFloatList(options.get('pulse_min_us', {}).get('value', '1000'), n)
+            self.pulse_max_us_list = self.parseFloatList(options.get('pulse_max_us', {}).get('value', '2000'), n)
+            self.min_deg_list = self.parseFloatList(options.get('min_deg', {}).get('value', '-90'), n)
+            self.max_deg_list = self.parseFloatList(options.get('max_deg', {}).get('value', '90'), n)
         except Exception as e:
             self.logger.log_warn(self.log_name + ": Failed to setup options " + str(e))
             return self.active_paths_list
@@ -158,6 +176,24 @@ class SvxServoMaestroDiscovery:
         if len(channels) == 0:
             channels = [0]
         return channels
+
+
+    def parseFloatList(self, value, count):
+        # "500" with count=2 -> [500.0, 500.0]; "500,900" with count=2 -> [500.0, 900.0].
+        # Shorter-than-count lists repeat their last entry so a single shared value
+        # keeps working unchanged for anyone not using per-channel calibration.
+        parts = [p.strip() for p in str(value).replace(';', ',').split(',') if p.strip() != '']
+        floats = []
+        for p in parts:
+            try:
+                floats.append(float(p))
+            except Exception:
+                pass
+        if len(floats) == 0:
+            floats = [0.0]
+        while len(floats) < count:
+            floats.append(floats[-1])
+        return floats[:count]
 
 
     def findCommandPorts(self):
@@ -225,13 +261,20 @@ class SvxServoMaestroDiscovery:
 
         # Setup required param server drv_dict for the node
         dict_param_name = nepi_sdk.create_namespace(self.base_namespace, node_name + "/drv_dict")
+        idx = self.channels_list.index(channel)
         self.drv_dict['DEVICE_DICT'] = {
             'device_name': device_name,
             'device_path': path_str,
             'channel': channel,
             'baud_str': self.baud_str,
             'device_number': self.device_number,
-            'serial_number': serial_number
+            'serial_number': serial_number,
+            # This channel's own calibration (see parseFloatList above) -- lets
+            # pan and tilt on the same board have different servos/ranges.
+            'pulse_min_us': self.pulse_min_us_list[idx],
+            'pulse_max_us': self.pulse_max_us_list[idx],
+            'min_deg': self.min_deg_list[idx],
+            'max_deg': self.max_deg_list[idx]
         }
         nepi_sdk.set_param(dict_param_name, self.drv_dict)
 

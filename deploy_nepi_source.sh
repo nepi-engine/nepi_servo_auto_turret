@@ -29,7 +29,7 @@
      NEPI_DEPLOY_USERNAME=nepihost
      NEPI_SSH_PORT=22
 #    NEPI_SSH_KEY: Private SSH key for SSH/Rsync to target (as applicable)
-     NEPI_SSH_KEY=/home/${USER}/.ssh/nepi_default_ssh_key
+     NEPI_SSH_KEY=${HOME}/.ssh/nepi_default_ssh_key
 #    NEPI_TARGET_SRC_DIR: Directory to deploy source code to
      NEPI_TARGET_SRC_DIR=/mnt/nepi_storage/nepi_src
 #    NEPI_SETUP_SRC_DIR: Directory to deploy setup source to
@@ -45,39 +45,38 @@ REPO="REPO_FOLDER_NAME"
 
 
 # Set NEPI folder variables if not configured by nepi aliases bash script
-if [[ ! -v NEPI_USER ]]; then
+if [[ -z "${NEPI_USER+x}" ]]; then
     NEPI_USER=nepi
 fi
-if [[ ! -v NEPI_HOME ]]; then
+if [[ -z "${NEPI_HOME+x}" ]]; then
     NEPI_HOME=/home/${NEPI_USER}
 fi
-if [[ ! -v NEPI_DOCKER ]]; then
+if [[ -z "${NEPI_DOCKER+x}" ]]; then
     NEPI_DOCKER=/mnt/nepi_docker
 fi
-if [[ ! -v NEPI_STORAGE ]]; then
+if [[ -z "${NEPI_STORAGE+x}" ]]; then
    NEPI_STORAGE=/mnt/nepi_storage
 fi
 
-if [[ ! -v NEPI_CONFIG ]]; then
+if [[ -z "${NEPI_CONFIG+x}" ]]; then
     NEPI_CONFIG=/mnt/nepi_config
 fi
-if [[ ! -v NEPI_BASE ]]; then
+if [[ -z "${NEPI_BASE+x}" ]]; then
     NEPI_BASE=/opt/nepi
 fi
-if [[ ! -v NEPI_RUI ]]; then
+if [[ -z "${NEPI_RUI+x}" ]]; then
     NEPI_RUI=${NEPI_BASE}/nepi_rui
 fi
-if [[ ! -v NEPI_ENGINE ]]; then
+if [[ -z "${NEPI_ENGINE+x}" ]]; then
     NEPI_ENGINE=${NEPI_BASE}/nepi_engine
 fi
-if [[ ! -v NEPI_ETC ]]; then
+if [[ -z "${NEPI_ETC+x}" ]]; then
     NEPI_ETC=${NEPI_BASE}/etc
 fi
 
 
 if [[ -z "${NEPI_REMOTE_SETUP}" ]]; then
-  echo "Must have environtment variable NEPI_REMOTE_SETUP set"
-  exit 1
+  NEPI_REMOTE_SETUP=1
 fi
 
 if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then

@@ -17,9 +17,9 @@ driver:
     OPTIONS:
       channels:
         type: 'String'
-        description: 'Comma-separated Maestro channels to expose as servos (e.g. "0" or "0,1"), or "all" for channels 0-5. One SVX node is launched per channel.'
-        default: '0'
-        value: '0'
+        description: 'Comma-separated Maestro channels to expose as servos (e.g. "0" or "0,1"), or "all" for channels 0-5. One SVX node is launched per channel. Defaults to "all" so every channel becomes its own controllable device regardless of which ones you have servos wired to -- the Maestro has no way to detect whether a servo is physically attached (open loop, no feedback wire), so this is the practical equivalent of "a device per servo" without pretending to auto-detect hardware.'
+        default: 'all'
+        value: 'all'
       protocol:
         type: Discrete
         description: 'Serial command protocol. Compact works for a single controller; Pololu adds a device number for daisy-chained boards.'
@@ -51,22 +51,22 @@ driver:
         value: '9600'
       pulse_min_us:
         type: 'String'
-        description: 'Servo pulse width (microseconds) at the minimum-degree hardstop.'
-        default: '1000'
-        value: '1000'
+        description: 'Servo pulse width (microseconds) at the minimum-degree hardstop. Single value applies to every channel in "channels"; a comma-separated list (e.g. "500,900") is matched positionally to "channels" so each servo can have its own calibration -- if shorter than "channels", the last value repeats for the rest.'
+        default: '500'
+        value: '500'
       pulse_max_us:
         type: 'String'
-        description: 'Servo pulse width (microseconds) at the maximum-degree hardstop.'
-        default: '2000'
-        value: '2000'
+        description: 'Servo pulse width (microseconds) at the maximum-degree hardstop. Same single-value-or-comma-list-matched-to-"channels" rule as pulse_min_us.'
+        default: '2300'
+        value: '2300'
       min_deg:
         type: 'String'
-        description: 'Degree value that maps to pulse_min_us (minimum hardstop).'
+        description: 'Degree value that maps to pulse_min_us (minimum hardstop). Same single-value-or-comma-list-matched-to-"channels" rule as pulse_min_us.'
         default: '-90'
         value: '-90'
       max_deg:
         type: 'String'
-        description: 'Degree value that maps to pulse_max_us (maximum hardstop).'
+        description: 'Degree value that maps to pulse_max_us (maximum hardstop). Same single-value-or-comma-list-matched-to-"channels" rule as pulse_min_us.'
         default: '90'
         value: '90'
       accel_units:

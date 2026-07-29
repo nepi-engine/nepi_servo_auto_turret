@@ -52,6 +52,12 @@ try:
 except Exception:
     HAVE_FCNTL = False
 
+try:
+    import usb.core  # Native USB control transfers, only for the firmware Min/Max
+    HAVE_PYUSB = True  # push below -- separate channel from the pyserial Command Port.
+except Exception:
+    HAVE_PYUSB = False
+
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
 from nepi_sdk import nepi_settings
@@ -84,6 +90,22 @@ class SvxServoMaestroNode:
 
     SERIAL_TIMEOUT_SEC = 0.25
     MAX_POSITION_UPDATE_RATE = 5
+
+    # Native USB control-transfer protocol, used only to push this channel's
+    # pulse_min_us/pulse_max_us as the Maestro's own onboard Set-Target clamp
+    # (PARAMETER_SERVO0_MIN/MAX) so it always matches this node's config instead
+    # of depending on leftover state from manual bench configuration. Separate
+    # wire protocol from the Compact-protocol bytes above; see maestro.md.
+    USB_VENDOR_ID = 0x1FFB
+    REQUEST_SET_PARAMETER = 0x82
+    REQUEST_REINITIALIZE = 0x90
+    # Channel 0's parameter numbers are confirmed against Pololu's Usc_protocol.cs.
+    # The +9-per-channel stride for channel > 0 is INFERRED from that enum's layout
+    # and not independently verified -- driver_pushFirmwareLimits() logs what it
+    # reads back so a wrong offset is obvious rather than silent.
+    PARAMETER_SERVO0_MIN = 32
+    PARAMETER_SERVO0_MAX = 33
+    CHANNEL_PARAM_STRIDE = 9
 
     #############################
     # Board-agnostic factory soft/hard limits (degrees) and the pulse-width
@@ -192,15 +214,20 @@ class SvxServoMaestroNode:
         # Optional discovery OPTIONS (protocol + pulse-width + degree range + accel)
         try:
             options = self.drv_dict.get('DISCOVERY_DICT', {}).get('OPTIONS', {})
+            device_dict = self.drv_dict.get('DEVICE_DICT', {})
             protocol = options.get('protocol', {}).get('value', 'Compact')
             self.use_pololu_protocol = (str(protocol).lower() == 'pololu')
 
-            self.pulse_min_us = float(options.get('pulse_min_us', {}).get('value', self.pulse_min_us))
-            self.pulse_max_us = float(options.get('pulse_max_us', {}).get('value', self.pulse_max_us))
+            # Prefer this channel's own calibration from DEVICE_DICT (set per-channel
+            # by discovery.py, positionally matched to "channels") so pan and tilt on
+            # one board can use different servos; fall back to the shared OPTIONS
+            # value for anyone running this node directly without discovery.
+            self.pulse_min_us = float(device_dict.get('pulse_min_us', options.get('pulse_min_us', {}).get('value', self.pulse_min_us)))
+            self.pulse_max_us = float(device_dict.get('pulse_max_us', options.get('pulse_max_us', {}).get('value', self.pulse_max_us)))
             self.accel_units = int(options.get('accel_units', {}).get('value', self.accel_units))
 
-            min_deg = float(options.get('min_deg', {}).get('value', self.FACTORY_LIMITS_DICT['min_hardstop_deg']))
-            max_deg = float(options.get('max_deg', {}).get('value', self.FACTORY_LIMITS_DICT['max_hardstop_deg']))
+            min_deg = float(device_dict.get('min_deg', options.get('min_deg', {}).get('value', self.FACTORY_LIMITS_DICT['min_hardstop_deg'])))
+            max_deg = float(device_dict.get('max_deg', options.get('max_deg', {}).get('value', self.FACTORY_LIMITS_DICT['max_hardstop_deg'])))
             self.FACTORY_LIMITS_DICT['min_hardstop_deg'] = min_deg
             self.FACTORY_LIMITS_DICT['max_hardstop_deg'] = max_deg
             self.FACTORY_LIMITS_DICT['min_softstop_deg'] = min_deg
@@ -245,6 +272,7 @@ class SvxServoMaestroNode:
         # Push the initial acceleration + speed to the board before we come up.
         self.driver_setAcceleration(self.accel_units)
         self.driver_setSpeedRatio(self.speed_ratio)
+        self.driver_pushFirmwareLimits()
 
         # Launch the SVX interface -- it subscribes/advertises all the servo
         # control topics, publishes status, and serves capabilities. We pass the
@@ -546,6 +574,43 @@ class SvxServoMaestroNode:
         error_bits = resp[0] | (resp[1] << 8)
         if error_bits != 0:
             self.msg_if.pub_warn("Maestro error flags: 0x{:04X}".format(error_bits))
+
+
+    def driver_pushFirmwareLimits(self):
+        # Best-effort: push pulse_min_us/pulse_max_us as the board's own onboard
+        # Set-Target clamp. This is a *different* wire path (native USB control
+        # transfers) than the Compact-protocol serial commands above, and needs
+        # raw USB permission (root or a udev rule for VID 0x1FFB) separate from the
+        # dialout-group access send_cmd() uses -- if that's not available, log a
+        # warning and continue on the serial path rather than fail node startup.
+        if not HAVE_PYUSB:
+            self.msg_if.pub_warn("pyusb not available; skipping firmware Min/Max push "
+                                 "(board keeps whatever onboard limits it already has)")
+            return
+        try:
+            dev = None
+            for d in usb.core.find(idVendor=self.USB_VENDOR_ID, find_all=True):
+                if str(getattr(d, 'serial_number', '')) == str(self.serial_num):
+                    dev = d
+                    break
+            if dev is None:
+                self.msg_if.pub_warn("Could not find Maestro on native USB (serial=" +
+                                     str(self.serial_num) + ") to push firmware Min/Max")
+                return
+
+            param_min = self.PARAMETER_SERVO0_MIN + self.channel * self.CHANNEL_PARAM_STRIDE
+            param_max = self.PARAMETER_SERVO0_MAX + self.channel * self.CHANNEL_PARAM_STRIDE
+            min_raw = max(0, min(255, round(self.pulse_min_us / 16)))
+            max_raw = max(0, min(255, round(self.pulse_max_us / 16)))
+
+            dev.ctrl_transfer(0x40, self.REQUEST_SET_PARAMETER, min_raw, (1 << 8) | param_min)
+            dev.ctrl_transfer(0x40, self.REQUEST_SET_PARAMETER, max_raw, (1 << 8) | param_max)
+            dev.ctrl_transfer(0x40, self.REQUEST_REINITIALIZE, 0, 0)
+            nepi_sdk.sleep(0.05)
+            self.msg_if.pub_info("Pushed firmware Min/Max for channel %d: %dus/%dus" %
+                                 (self.channel, min_raw * 16, max_raw * 16))
+        except Exception as e:
+            self.msg_if.pub_warn("Failed to push firmware Min/Max (continuing without it): " + str(e))
 
 
     #######################
