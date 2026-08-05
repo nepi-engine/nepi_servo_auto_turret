@@ -94,8 +94,11 @@ class SvxServoMaestroNode:
     # Native USB control-transfer protocol, used only to push this channel's
     # pulse_min_us/pulse_max_us as the Maestro's own onboard Set-Target clamp
     # (PARAMETER_SERVO0_MIN/MAX) so it always matches this node's config instead
-    # of depending on leftover state from manual bench configuration. Separate
-    # wire protocol from the Compact-protocol bytes above; see maestro.md.
+    # of depending on leftover state from manual bench configuration. This is a
+    # separate wire protocol from the Compact-protocol serial bytes above: native
+    # USB control transfers via pyusb, needing raw USB permission (root or a udev
+    # rule for VID 0x1FFB) rather than the dialout access send_cmd() uses. Entirely
+    # best-effort -- see driver_pushFirmwareLimits() below.
     USB_VENDOR_ID = 0x1FFB
     REQUEST_SET_PARAMETER = 0x82
     REQUEST_REINITIALIZE = 0x90
@@ -586,6 +589,20 @@ class SvxServoMaestroNode:
         if not HAVE_PYUSB:
             self.msg_if.pub_warn("pyusb not available; skipping firmware Min/Max push "
                                  "(board keeps whatever onboard limits it already has)")
+            return
+        if self.channel != 0:
+            # Channel 0's parameter numbers are confirmed; the +9-per-channel
+            # stride for higher channels is inferred and unverified (see
+            # CHANNEL_PARAM_STRIDE above). These are writes to the board's
+            # PERSISTENT settings followed by a reinitialize, so a wrong offset
+            # would corrupt board configuration rather than just fail. Skip until
+            # the stride is confirmed against real hardware. Nothing is lost:
+            # SVXActuatorIF clamps every commanded position to the soft limits
+            # before it ever reaches this driver, so the onboard clamp is
+            # belt-and-braces, and the board simply keeps its existing limits.
+            self.msg_if.pub_info("Skipping firmware Min/Max push on channel %d "
+                                 "(per-channel parameter stride not yet hardware-verified); "
+                                 "board keeps its existing onboard limits" % self.channel)
             return
         try:
             dev = None

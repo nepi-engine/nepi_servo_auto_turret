@@ -28,7 +28,20 @@
 # SVX node per configured servo channel, all sharing that one Command Port. The
 # node serializes port access with an advisory file lock, so several channel
 # nodes on one board coexist safely.
+#
+# The Maestro is open loop -- there is no feedback wire, so the board cannot tell
+# whether a servo is physically attached to a channel. Which channels carry
+# servos is therefore user-declared config (the "channels" option), never
+# auto-detected.
+#
+# Unlike the usual one-device-per-path NEPI drivers, one path here backs several
+# devices, so this discovery reconciles a desired set of (path, channel) pairs
+# against what is running on every pass rather than claiming a path once. That is
+# what lets the "channels" option be edited live in the RUI: adding a channel
+# launches just that node, removing one kills just that node, and reordering the
+# option changes nothing.
 
+import copy
 import time
 
 import serial
@@ -44,11 +57,20 @@ FILE_TYPE = 'DISCOVERY'
 
 class SvxServoMaestroDiscovery:
 
-    # Pololu USB vendor ID and the Maestro product IDs (Micro 6 + Mini 12/18/24).
-    # Both virtual serial ports of a board share the same VID/PID; they differ by
-    # USB interface number, which is how we pick the Command Port below.
+    # Pololu USB vendor ID and the Maestro product IDs mapped to their servo
+    # channel counts. Both virtual serial ports of a board share the same
+    # VID/PID; they differ by USB interface number, which is how we pick the
+    # Command Port below.
     POLOLU_VENDOR_ID = 0x1FFB
-    MAESTRO_PRODUCT_IDS = [0x0089, 0x008A, 0x008B, 0x008C]
+    MAESTRO_CHANNEL_COUNTS = {
+        0x0089: 6,   # Micro Maestro 6-Channel
+        0x008A: 12,  # Mini Maestro 12-Channel
+        0x008B: 18,  # Mini Maestro 18-Channel
+        0x008C: 24   # Mini Maestro 24-Channel
+    }
+    # Used when a board reports no usable PID. The Micro is the smallest board,
+    # so assuming it never invents channels that do not exist.
+    DEFAULT_CHANNEL_COUNT = 6
 
     node_launch_name = "maestro"
 
@@ -56,20 +78,23 @@ class SvxServoMaestroDiscovery:
     active_devices_dict = dict()
     active_paths_list = []
     dont_retry_list = []
+    # path -> last resolved channel list, so the resolution is logged on change
+    # rather than every pass.
+    last_channels_dict = dict()
 
     retry = True
 
-    # Discovery options (populated from drv_dict each pass)
-    channels_list = [0]
+    # Discovery options (populated from drv_dict each pass). The calibration
+    # options are kept as raw strings here; they are parsed per board, against
+    # that board's resolved channel list, in channelCalibration().
+    channels_str = 'all'
     baud_str = '9600'
     device_number = 12
-    protocol = 'Compact'
     command_port_index = 0
-    pulse_min_us = 1000.0
-    pulse_max_us = 2000.0
-    min_deg = -90.0
-    max_deg = 90.0
-    accel_units = 0
+    pulse_min_us_str = '500'
+    pulse_max_us_str = '2300'
+    min_deg_str = '-90'
+    max_deg_str = '90'
 
 
     ################################################
@@ -89,37 +114,21 @@ class SvxServoMaestroDiscovery:
         self.base_namespace = base_namespace
 
         ##################################
-        # Get discovery options
+        # Get discovery options. Values that are per-channel are kept as raw
+        # strings -- parsing them to a single float here would raise on the
+        # comma-separated form the options explicitly support, and the enclosing
+        # except would then silently launch nothing while drivers_mgr still
+        # reported this driver as running.
         try:
             options = self.drv_dict.get('DISCOVERY_DICT', {}).get('OPTIONS', {})
-            # Hardcoded, not read from the 'channels' OPTIONS value: a persisted param
-            # server override for this option has repeatedly outlived redeploys/rebuilds
-            # on real devices, silently limiting discovery to one stale channel. Always
-            # expose every Micro Maestro channel (0-5) as its own device instead -- the
-            # Maestro has no way to detect which channels have a servo physically wired
-            # (open loop, no feedback wire) anyway, so this is the only reliable way to
-            # guarantee "a device per servo" regardless of device config-persistence state.
-            self.channels_list = list(range(0, 6))
+            self.channels_str = str(options.get('channels', {}).get('value', 'all'))
             self.baud_str = str(options.get('baud_rate', {}).get('value', '9600'))
             self.device_number = int(options.get('device_number', {}).get('value', 12))
-            self.protocol = str(options.get('protocol', {}).get('value', 'Compact'))
             self.command_port_index = int(options.get('command_port_index', {}).get('value', 0))
-            self.pulse_min_us = float(options.get('pulse_min_us', {}).get('value', 1000.0))
-            self.pulse_max_us = float(options.get('pulse_max_us', {}).get('value', 2000.0))
-            self.min_deg = float(options.get('min_deg', {}).get('value', -90.0))
-            self.max_deg = float(options.get('max_deg', {}).get('value', 90.0))
-            self.accel_units = int(options.get('accel_units', {}).get('value', 0))
-
-            # Per-channel calibration: each of these may be a single value (applied
-            # to every channel) or a comma-separated list matched positionally to
-            # channels_list, so e.g. a pan servo and a tilt servo on one board can
-            # each get their own pulse-width/degree range. Embedded per-channel into
-            # each node's own DEVICE_DICT below, not left as one shared OPTIONS value.
-            n = len(self.channels_list)
-            self.pulse_min_us_list = self.parseFloatList(options.get('pulse_min_us', {}).get('value', '1000'), n)
-            self.pulse_max_us_list = self.parseFloatList(options.get('pulse_max_us', {}).get('value', '2000'), n)
-            self.min_deg_list = self.parseFloatList(options.get('min_deg', {}).get('value', '-90'), n)
-            self.max_deg_list = self.parseFloatList(options.get('max_deg', {}).get('value', '90'), n)
+            self.pulse_min_us_str = str(options.get('pulse_min_us', {}).get('value', '500'))
+            self.pulse_max_us_str = str(options.get('pulse_max_us', {}).get('value', '2300'))
+            self.min_deg_str = str(options.get('min_deg', {}).get('value', '-90'))
+            self.max_deg_str = str(options.get('max_deg', {}).get('value', '90'))
         except Exception as e:
             self.logger.log_warn(self.log_name + ": Failed to setup options " + str(e))
             return self.active_paths_list
@@ -129,7 +138,9 @@ class SvxServoMaestroDiscovery:
         if self.retry == True:
             self.dont_retry_list = []
 
-        ### Purge nodes whose Command Port has disappeared
+        ### Purge nodes whose Command Port has disappeared from /dev.
+        # Kept separate from the desired-set reconciliation below so a board
+        # vanishing and a port-enumeration hiccup stay distinguishable.
         path_purge_list = []
         for launch_id in list(self.active_devices_dict.keys()):
             path_str = self.active_devices_dict[launch_id]['path']
@@ -138,18 +149,48 @@ class SvxServoMaestroDiscovery:
         for launch_id in path_purge_list:
             self.killDevice(launch_id)
 
-        ### Look for Maestro Command Ports and launch a node per configured channel
-        command_ports = self.findCommandPorts()
+        ### Enumerate Maestro Command Ports
+        [command_ports, enumerate_ok] = self.findCommandPorts()
+        if enumerate_ok == False:
+            # Port enumeration failed rather than finding no boards. Reconciling
+            # against an empty list here would tear down every running node and
+            # respawn it on the next pass, so change nothing.
+            return self.active_paths_list
+
+        ### Build the desired set of (path, channel) pairs
+        desired_dict = dict()
         for port_info in command_ports:
             path_str = port_info['path']
-            if path_str in self.active_paths_list or path_str in self.dont_retry_list:
+            channels_list = self.resolveChannels(port_info)
+            calibration_dict = self.channelCalibration(channels_list)
+            for channel in channels_list:
+                launch_id = path_str + ":ch" + str(channel)
+                desired_dict[launch_id] = {
+                    'port_info': port_info,
+                    'channel': channel,
+                    'calibration': calibration_dict[channel]
+                }
+
+        ### Kill any running channel that is no longer wanted (channel removed
+        ### from the option, or its board is gone).
+        for launch_id in list(self.active_devices_dict.keys()):
+            if launch_id not in desired_dict:
+                self.killDevice(launch_id)
+
+        ### Launch any wanted channel that is not running yet
+        for launch_id in sorted(desired_dict.keys()):
+            if launch_id in self.active_devices_dict:
                 continue
-            self.logger.log_info("Found Maestro Command Port at: " + path_str)
-            launched_any = False
-            for channel in self.channels_list:
-                success = self.launchDeviceNode(path_str, channel, port_info['serial_number'])
-                launched_any = launched_any or success
-            if launched_any and path_str not in self.active_paths_list:
+            entry = desired_dict[launch_id]
+            if entry['port_info']['path'] in self.dont_retry_list:
+                continue
+            self.launchDeviceNode(entry['port_info'], entry['channel'], entry['calibration'])
+
+        ### Claim each board's path once any of its channels is live
+        for port_info in command_ports:
+            path_str = port_info['path']
+            still_active = any(e['path'] == path_str for e in self.active_devices_dict.values())
+            if still_active and path_str not in self.active_paths_list:
                 self.active_paths_list.append(path_str)
         return self.active_paths_list
     ################################################
@@ -157,43 +198,135 @@ class SvxServoMaestroDiscovery:
 
     ##########  Device specific calls
 
-    def parseChannels(self, channels_str):
-        # "0" -> [0]; "0,1" -> [0,1]; "all" -> [0..5] (Micro Maestro 6-channel).
-        channels_str = str(channels_str).strip().lower()
+    def resolveChannels(self, port_info):
+        # Turn the "channels" option into this board's channel list, validated
+        # against how many channels the board actually has. A stale or nonsense
+        # value must never silently narrow discovery to a subset -- anything
+        # unusable falls back to every channel, loudly.
+        channel_count = port_info['channel_count']
+        path_str = port_info['path']
+
+        channels_str = str(self.channels_str).strip().lower()
         if channels_str == 'all':
-            return list(range(0, 6))
+            resolved = list(range(0, channel_count))
+        else:
+            parsed = self.parseChannels(channels_str)
+            resolved = []
+            for channel in parsed:
+                if 0 <= channel < channel_count:
+                    resolved.append(channel)
+                else:
+                    self.logger.log_warn("Ignoring channel " + str(channel) + " for " + path_str +
+                                         ": board has " + str(channel_count) + " channels (0-" +
+                                         str(channel_count - 1) + ")")
+            if len(resolved) == 0:
+                self.logger.log_warn("No usable channels in channels option '" + str(self.channels_str) +
+                                     "' for " + path_str + "; falling back to all " +
+                                     str(channel_count) + " channels")
+                resolved = list(range(0, channel_count))
+
+        if self.last_channels_dict.get(path_str) != resolved:
+            self.logger.log_info("Channels for " + path_str + ": " + str(resolved))
+            self.last_channels_dict[path_str] = list(resolved)
+        return resolved
+
+
+    def parseChannels(self, channels_str):
+        # "0" -> [0]; "0,1" -> [0,1]; "5,0,4" -> [5,0,4]. Written order is
+        # preserved and duplicates are dropped. Returns [] when nothing parses;
+        # the caller decides the fallback (never silently narrow to one channel).
+        # Out-of-range values are left in place for resolveChannels() to reject
+        # against the real board so the operator gets told which value was bad.
         channels = []
-        for tok in channels_str.replace(';', ',').split(','):
+        for tok in str(channels_str).replace(';', ',').split(','):
             tok = tok.strip()
             if tok == '':
                 continue
             try:
-                ch = int(tok)
-                if 0 <= ch <= 23 and ch not in channels:
-                    channels.append(ch)
+                channel = int(tok)
             except Exception:
-                pass
-        if len(channels) == 0:
-            channels = [0]
+                self.logger.log_warn("Ignoring unparseable channels entry: '" + tok + "'")
+                continue
+            if channel not in channels:
+                channels.append(channel)
         return channels
 
 
-    def parseFloatList(self, value, count):
-        # "500" with count=2 -> [500.0, 500.0]; "500,900" with count=2 -> [500.0, 900.0].
-        # Shorter-than-count lists repeat their last entry so a single shared value
-        # keeps working unchanged for anyone not using per-channel calibration.
-        parts = [p.strip() for p in str(value).replace(';', ',').split(',') if p.strip() != '']
+    def channelCalibration(self, channels_list):
+        # Per-channel pulse-width/degree calibration, so pan and tilt on one
+        # board can use different servos. Returns {channel: {...}}.
+        pulse_min_dict = self.parseChannelFloats(self.pulse_min_us_str, channels_list, 500.0, 'pulse_min_us')
+        pulse_max_dict = self.parseChannelFloats(self.pulse_max_us_str, channels_list, 2300.0, 'pulse_max_us')
+        min_deg_dict = self.parseChannelFloats(self.min_deg_str, channels_list, -90.0, 'min_deg')
+        max_deg_dict = self.parseChannelFloats(self.max_deg_str, channels_list, 90.0, 'max_deg')
+
+        calibration_dict = dict()
+        for channel in channels_list:
+            calibration_dict[channel] = {
+                'pulse_min_us': pulse_min_dict[channel],
+                'pulse_max_us': pulse_max_dict[channel],
+                'min_deg': min_deg_dict[channel],
+                'max_deg': max_deg_dict[channel]
+            }
+        return calibration_dict
+
+
+    def parseChannelFloats(self, value, channels_list, default_value, option_name):
+        # Three accepted forms, returned as {channel: float}:
+        #   "500"          -> every channel gets 500
+        #   "500,900"      -> positional, matched to channels_list AS WRITTEN
+        #   "0:500,5:900"  -> keyed by channel number, order-independent
+        # The keyed form is preferred: with the positional form, reordering the
+        # "channels" option silently reassigns each value to a different servo,
+        # which can drive a servo past its mechanical stop.
+        tokens = [t.strip() for t in str(value).replace(';', ',').split(',') if t.strip() != '']
+        default_dict = dict()
+        for channel in channels_list:
+            default_dict[channel] = float(default_value)
+        if len(tokens) == 0:
+            return default_dict
+
+        keyed_tokens = [t for t in tokens if ':' in t]
+        if len(keyed_tokens) > 0:
+            if len(keyed_tokens) != len(tokens):
+                self.logger.log_warn("Option " + option_name + " mixes keyed and positional entries ('" +
+                                     str(value) + "'); using defaults")
+                return default_dict
+            keyed_dict = dict()
+            for tok in tokens:
+                key_str, _, val_str = tok.partition(':')
+                try:
+                    keyed_dict[int(key_str.strip())] = float(val_str.strip())
+                except Exception:
+                    self.logger.log_warn("Ignoring unparseable " + option_name + " entry: '" + tok + "'")
+            if len(keyed_dict) == 0:
+                return default_dict
+            result_dict = dict()
+            for channel in channels_list:
+                if channel in keyed_dict:
+                    result_dict[channel] = keyed_dict[channel]
+                else:
+                    self.logger.log_warn("Option " + option_name + " has no entry for channel " +
+                                         str(channel) + "; using default " + str(default_value))
+                    result_dict[channel] = float(default_value)
+            return result_dict
+
         floats = []
-        for p in parts:
+        for tok in tokens:
             try:
-                floats.append(float(p))
+                floats.append(float(tok))
             except Exception:
-                pass
+                self.logger.log_warn("Ignoring unparseable " + option_name + " entry: '" + tok + "'")
         if len(floats) == 0:
-            floats = [0.0]
-        while len(floats) < count:
+            return default_dict
+        # Shorter-than-needed lists repeat their last entry so a single shared
+        # value keeps working for anyone not using per-channel calibration.
+        while len(floats) < len(channels_list):
             floats.append(floats[-1])
-        return floats[:count]
+        result_dict = dict()
+        for i, channel in enumerate(channels_list):
+            result_dict[channel] = floats[i]
+        return result_dict
 
 
     def findCommandPorts(self):
@@ -201,16 +334,18 @@ class SvxServoMaestroDiscovery:
         # two ports of each physical board by serial number, and return the
         # Command Port of each board (the lowest USB interface number, or the
         # command_port_index-th when a board exposes them in a fixed order).
+        # Returns [ports, ok]; ok is False only when enumeration itself failed,
+        # which the caller must not confuse with "no boards attached".
         matches = []
         try:
             for p in list_ports.comports():
                 vid = getattr(p, 'vid', None)
                 pid = getattr(p, 'pid', None)
-                if vid == self.POLOLU_VENDOR_ID and (pid in self.MAESTRO_PRODUCT_IDS or pid is None):
+                if vid == self.POLOLU_VENDOR_ID and (pid in self.MAESTRO_CHANNEL_COUNTS or pid is None):
                     matches.append(p)
         except Exception as e:
             self.logger.log_warn("Failed to enumerate serial ports: " + str(e))
-            return []
+            return [], False
 
         # Group by serial number (falls back to the location prefix if the board
         # reports no serial number).
@@ -229,11 +364,14 @@ class SvxServoMaestroDiscovery:
             if idx < 0 or idx >= len(ports_sorted):
                 idx = 0
             chosen = ports_sorted[idx]
+            pid = getattr(chosen, 'pid', None)
+            channel_count = self.MAESTRO_CHANNEL_COUNTS.get(pid, self.DEFAULT_CHANNEL_COUNT)
             command_ports.append({
                 'path': chosen.device,
-                'serial_number': getattr(chosen, 'serial_number', None) or 'Unknown'
+                'serial_number': getattr(chosen, 'serial_number', None) or 'Unknown',
+                'channel_count': channel_count
             })
-        return command_ports
+        return command_ports, True
 
 
     def interfaceSortKey(self, port):
@@ -249,34 +387,56 @@ class SvxServoMaestroDiscovery:
         return (1, str(getattr(port, 'device', '')))
 
 
-    def launchDeviceNode(self, path_str, channel, serial_number):
+    def boardIdString(self, port_info):
+        # Board identifier used in the device name. The serial number is stable
+        # across reboots; the port basename ("ttyACM0") is not, and the device
+        # name keys the NEPI device alias and its saved config -- so a reboot
+        # that renumbers the ports must not reattach a saved config to a
+        # different servo. Falls back to the port basename only when the board
+        # reports no serial number.
+        serial_number = port_info.get('serial_number', None)
+        if serial_number is None or str(serial_number).strip() in ['', 'Unknown']:
+            board_id = port_info['path'].split('/')[-1]
+        else:
+            board_id = str(serial_number).strip()
+        # Node names must be plain identifiers
+        safe_id = ''.join(c if (c.isalnum() or c == '_') else '_' for c in board_id)
+        return safe_id
+
+
+    def launchDeviceNode(self, port_info, channel, calibration):
+        path_str = port_info['path']
         launch_id = path_str + ":ch" + str(channel)
         if launch_id in self.active_devices_dict:
             return True
 
         file_name = self.drv_dict['NODE_DICT']['file_name']
-        device_name = self.node_launch_name + "_" + path_str.split('/')[-1] + "_ch" + str(channel)
+        device_name = self.node_launch_name + "_" + self.boardIdString(port_info) + "_ch" + str(channel)
         node_name = nepi_system.get_device_alias(device_name)
-        self.logger.log_info("Launching node: " + node_name + " on channel " + str(channel))
+        self.logger.log_info("Launching node: " + node_name + " on channel " + str(channel) +
+                             " with " + str(calibration['pulse_min_us']) + "-" +
+                             str(calibration['pulse_max_us']) + "us over " +
+                             str(calibration['min_deg']) + " to " + str(calibration['max_deg']) + " deg")
 
-        # Setup required param server drv_dict for the node
-        dict_param_name = nepi_sdk.create_namespace(self.base_namespace, node_name + "/drv_dict")
-        idx = self.channels_list.index(channel)
-        self.drv_dict['DEVICE_DICT'] = {
+        # Setup required param server drv_dict for the node. Deep-copied per
+        # launch so the DEVICE_DICT of one channel can never leak into another's.
+        node_drv_dict = copy.deepcopy(self.drv_dict)
+        node_drv_dict['DEVICE_DICT'] = {
             'device_name': device_name,
             'device_path': path_str,
             'channel': channel,
             'baud_str': self.baud_str,
             'device_number': self.device_number,
-            'serial_number': serial_number,
-            # This channel's own calibration (see parseFloatList above) -- lets
-            # pan and tilt on the same board have different servos/ranges.
-            'pulse_min_us': self.pulse_min_us_list[idx],
-            'pulse_max_us': self.pulse_max_us_list[idx],
-            'min_deg': self.min_deg_list[idx],
-            'max_deg': self.max_deg_list[idx]
+            'serial_number': port_info['serial_number'],
+            # This channel's own calibration (see parseChannelFloats above) --
+            # lets pan and tilt on the same board have different servos/ranges.
+            'pulse_min_us': calibration['pulse_min_us'],
+            'pulse_max_us': calibration['pulse_max_us'],
+            'min_deg': calibration['min_deg'],
+            'max_deg': calibration['max_deg']
         }
-        nepi_sdk.set_param(dict_param_name, self.drv_dict)
+        dict_param_name = nepi_sdk.create_namespace(self.base_namespace, node_name + "/drv_dict")
+        nepi_sdk.set_param(dict_param_name, node_drv_dict)
 
         [success, msg, sub_process] = nepi_drvs.launchDriverNode(file_name, node_name, device_path = path_str)
         if success:
@@ -301,13 +461,16 @@ class SvxServoMaestroDiscovery:
         node_name = entry['node_name']
         sub_process = entry['sub_process']
         path_str = entry['path']
-        self.logger.log_info("No longer detecting Maestro; killing node: " + node_name)
+        self.logger.log_info("Killing node: " + node_name)
         nepi_drvs.killDriverNode(node_name, sub_process)
         del self.active_devices_dict[launch_id]
         # Drop the path from active list only once none of its channels remain.
         still_active = any(e['path'] == path_str for e in self.active_devices_dict.values())
-        if not still_active and path_str in self.active_paths_list:
-            self.active_paths_list.remove(path_str)
+        if not still_active:
+            if path_str in self.active_paths_list:
+                self.active_paths_list.remove(path_str)
+            if path_str in self.last_channels_dict:
+                del self.last_channels_dict[path_str]
 
 
     def killAllDevices(self, active_paths_list):
@@ -324,6 +487,7 @@ class SvxServoMaestroDiscovery:
             if path_str in self.active_paths_list:
                 self.active_paths_list.remove(path_str)
         self.active_devices_dict = dict()
+        self.last_channels_dict = dict()
         nepi_sdk.sleep(1)
         return active_paths_list
 
