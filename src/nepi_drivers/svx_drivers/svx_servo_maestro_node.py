@@ -111,35 +111,74 @@ class SvxServoMaestroNode:
     CHANNEL_PARAM_STRIDE = 9
 
     #############################
+    # Per-servo calibration.
+    #
+    # These describe THE SERVO, not the Maestro -- a pan servo and a tilt servo
+    # on the same board routinely have different horns, travel, and pulse
+    # endpoints. So they are node settings (see CAP_SETTINGS below), adjustable
+    # live per device in the RUI and persisted per device, and the values here
+    # are only the bootstrap defaults a servo starts from before anyone
+    # calibrates it. The driver's discovery OPTIONS deliberately say nothing
+    # about them.
+    DEFAULT_PULSE_MIN_US = 500.0
+    DEFAULT_PULSE_MAX_US = 2300.0
+    DEFAULT_MIN_DEG = -90.0
+    DEFAULT_MAX_DEG = 90.0
+    DEFAULT_ACCEL_UNITS = 0
+
+    # Outer bounds the settings will accept. The pulse range covers any hobby
+    # servo worth driving; the Maestro's own acceleration parameter is a single
+    # byte, hence 0-255.
+    PULSE_US_MIN = 100.0
+    PULSE_US_MAX = 3000.0
+    DEG_MIN = -180.0
+    DEG_MAX = 180.0
+    ACCEL_UNITS_MIN = 0
+    ACCEL_UNITS_MAX = 255
+
+    # Smallest degree span a servo may be calibrated to. Below this the
+    # degree <-> pulse-width map stops meaning anything, and deg2us() would be
+    # dividing by ~zero.
+    MIN_DEG_SPAN = 1.0
+
     # Board-agnostic factory soft/hard limits (degrees) and the pulse-width
-    # endpoints they map to. A common hobby positional servo sweeps +/-90 deg
-    # over a 1000-2000 us pulse; the driver options override this per servo/horn.
+    # endpoints they map to. Deep-copied per instance in __init__ so the settings
+    # write to this node's own limits rather than the class-level dict.
     FACTORY_LIMITS_DICT = dict()
-    FACTORY_LIMITS_DICT['min_hardstop_deg'] = -90
-    FACTORY_LIMITS_DICT['max_hardstop_deg'] = 90
-    FACTORY_LIMITS_DICT['min_softstop_deg'] = -90
-    FACTORY_LIMITS_DICT['max_softstop_deg'] = 90
+    FACTORY_LIMITS_DICT['min_hardstop_deg'] = DEFAULT_MIN_DEG
+    FACTORY_LIMITS_DICT['max_hardstop_deg'] = DEFAULT_MAX_DEG
+    FACTORY_LIMITS_DICT['min_softstop_deg'] = DEFAULT_MIN_DEG
+    FACTORY_LIMITS_DICT['max_softstop_deg'] = DEFAULT_MAX_DEG
 
     limits_dict = copy.deepcopy(FACTORY_LIMITS_DICT)
 
     # Pulse-width mapping (microseconds). pulse_min_us <-> min_hardstop_deg and
-    # pulse_max_us <-> max_hardstop_deg. Overridden from the driver options.
-    pulse_min_us = 1000.0
-    pulse_max_us = 2000.0
-    accel_units = 0  # 0 == no acceleration limit
+    # pulse_max_us <-> max_hardstop_deg.
+    pulse_min_us = DEFAULT_PULSE_MIN_US
+    pulse_max_us = DEFAULT_PULSE_MAX_US
+    accel_units = DEFAULT_ACCEL_UNITS  # 0 == no acceleration limit
 
     CAP_SETTINGS = {
-        'None' : {"type":"None","name":"None","options":[""]}
-    }
-
-    FACTORY_SETTINGS = {
-        'None' : {"type":"None","name":"None","options":[""]}
+        'pulse_min_us' : {"type":"Float","name":"pulse_min_us",
+                          "options":[str(PULSE_US_MIN), str(PULSE_US_MAX)]},
+        'pulse_max_us' : {"type":"Float","name":"pulse_max_us",
+                          "options":[str(PULSE_US_MIN), str(PULSE_US_MAX)]},
+        'min_deg' :      {"type":"Float","name":"min_deg",
+                          "options":[str(DEG_MIN), str(DEG_MAX)]},
+        'max_deg' :      {"type":"Float","name":"max_deg",
+                          "options":[str(DEG_MIN), str(DEG_MAX)]},
+        'accel_units' :  {"type":"Int","name":"accel_units",
+                          "options":[str(ACCEL_UNITS_MIN), str(ACCEL_UNITS_MAX)]}
     }
 
     FACTORY_SETTINGS_OVERRIDES = dict()
 
     settingFunctions = {
-        'None' : {'get':'getNone', 'set': 'setNone'}
+        'pulse_min_us' : {'get':'getPulseMinUs', 'set': 'setPulseMinUs'},
+        'pulse_max_us' : {'get':'getPulseMaxUs', 'set': 'setPulseMaxUs'},
+        'min_deg' :      {'get':'getMinDeg',     'set': 'setMinDeg'},
+        'max_deg' :      {'get':'getMaxDeg',     'set': 'setMaxDeg'},
+        'accel_units' :  {'get':'getAccelUnits', 'set': 'setAccelUnits'}
     }
 
     device_info_dict = dict(device_name = "",
@@ -214,35 +253,22 @@ class SvxServoMaestroNode:
             nepi_sdk.signal_shutdown(self.node_name + ": Shutting down because no valid Device Dict")
             return
 
-        # Optional discovery OPTIONS (protocol + pulse-width + degree range + accel)
+        # Per-instance copy of the calibration limits. The settings below write
+        # into these, and the class-level dict must not be the thing they write
+        # to.
+        self.FACTORY_LIMITS_DICT = copy.deepcopy(SvxServoMaestroNode.FACTORY_LIMITS_DICT)
+        self.limits_dict = copy.deepcopy(self.FACTORY_LIMITS_DICT)
+
+        # The only discovery OPTION this node reads. Everything describing the
+        # servo itself (pulse endpoints, degree range, acceleration) is a node
+        # setting instead -- see CAP_SETTINGS. The board-level options stay with
+        # the board.
         try:
             options = self.drv_dict.get('DISCOVERY_DICT', {}).get('OPTIONS', {})
-            device_dict = self.drv_dict.get('DEVICE_DICT', {})
             protocol = options.get('protocol', {}).get('value', 'Compact')
             self.use_pololu_protocol = (str(protocol).lower() == 'pololu')
-
-            # Prefer this channel's own calibration from DEVICE_DICT (set per-channel
-            # by discovery.py, positionally matched to "channels") so pan and tilt on
-            # one board can use different servos; fall back to the shared OPTIONS
-            # value for anyone running this node directly without discovery.
-            self.pulse_min_us = float(device_dict.get('pulse_min_us', options.get('pulse_min_us', {}).get('value', self.pulse_min_us)))
-            self.pulse_max_us = float(device_dict.get('pulse_max_us', options.get('pulse_max_us', {}).get('value', self.pulse_max_us)))
-            self.accel_units = int(options.get('accel_units', {}).get('value', self.accel_units))
-
-            min_deg = float(device_dict.get('min_deg', options.get('min_deg', {}).get('value', self.FACTORY_LIMITS_DICT['min_hardstop_deg'])))
-            max_deg = float(device_dict.get('max_deg', options.get('max_deg', {}).get('value', self.FACTORY_LIMITS_DICT['max_hardstop_deg'])))
-            self.FACTORY_LIMITS_DICT['min_hardstop_deg'] = min_deg
-            self.FACTORY_LIMITS_DICT['max_hardstop_deg'] = max_deg
-            self.FACTORY_LIMITS_DICT['min_softstop_deg'] = min_deg
-            self.FACTORY_LIMITS_DICT['max_softstop_deg'] = max_deg
-            self.limits_dict = copy.deepcopy(self.FACTORY_LIMITS_DICT)
         except Exception as e:
             self.msg_if.pub_warn("Failed to parse driver OPTIONS, using defaults: " + str(e))
-
-        if self.pulse_max_us <= self.pulse_min_us:
-            self.msg_if.pub_warn("Invalid pulse-width range, reverting to 1000-2000us")
-            self.pulse_min_us = 1000.0
-            self.pulse_max_us = 2000.0
 
         ################################################
         self.msg_if.pub_info("Connecting to Maestro on port " + str(self.port_str) +
@@ -364,15 +390,21 @@ class SvxServoMaestroNode:
         return settings
 
     def setSetting(self, setting_name, val):
+        # Returns [success, msg]. settingUpdateFunction below unpacks both, so a
+        # bare bool here raises on every settings write.
         success = False
+        msg = ""
         if setting_name in self.settingFunctions.keys():
             function_str_name = self.settingFunctions[setting_name]['set']
             set_function = getattr(self, function_str_name, None)
             if set_function is None:
-                self.msg_if.pub_warn("Missing set function: " + function_str_name)
+                msg = "Missing set function: " + function_str_name
+                self.msg_if.pub_warn(msg)
             else:
-                success = set_function(val)
-        return success
+                [success, msg] = set_function(val)
+        else:
+            msg = "No set function registered for setting: " + str(setting_name)
+        return success, msg
 
     def settingUpdateFunction(self, setting):
         success = False
@@ -395,16 +427,133 @@ class SvxServoMaestroNode:
 
     ##############
     ### Settings Functions
+    #
+    # Per-servo calibration -- what makes one servo on a Maestro different from
+    # the next one on the same board. Kept here rather than in the driver's
+    # discovery OPTIONS because these describe the servo, not the controller.
+    #
+    # Convention: getSettings() above resolves getters through globals(), so each
+    # getter needs the 'global' line in front of it. Setters resolve through
+    # getattr(self, ...) and do not. Every setter returns [success, msg].
+    #
+    # The pulse endpoints and the degree range are set independently by the UI
+    # but only make sense as a pair, so each setter routes through a shared
+    # range function that validates the resulting pair as a whole.
 
-    global getNone
-    def getNone(self):
-        val = '-999'
-        return val
+    global getPulseMinUs
+    def getPulseMinUs(self):
+        return self.pulse_min_us
 
-    global setNone
-    def setNone(self,val):
-        success = True
-        return success
+    def setPulseMinUs(self, val):
+        return self.setPulseRange(new_min = val)
+
+    global getPulseMaxUs
+    def getPulseMaxUs(self):
+        return self.pulse_max_us
+
+    def setPulseMaxUs(self, val):
+        return self.setPulseRange(new_max = val)
+
+    def setPulseRange(self, new_min = None, new_max = None):
+        try:
+            pulse_min = self.pulse_min_us if new_min is None else float(new_min)
+            pulse_max = self.pulse_max_us if new_max is None else float(new_max)
+        except Exception as e:
+            return False, "Pulse width is not a number: " + str(e)
+
+        for val in [pulse_min, pulse_max]:
+            if val < self.PULSE_US_MIN or val > self.PULSE_US_MAX:
+                return False, ("Pulse width " + str(val) + "us is outside the supported range " +
+                               str(self.PULSE_US_MIN) + "-" + str(self.PULSE_US_MAX) + "us")
+        if pulse_max <= pulse_min:
+            return False, ("Rejecting pulse range " + str(pulse_min) + "-" + str(pulse_max) +
+                           "us: max must be greater than min")
+
+        self.pulse_min_us = pulse_min
+        self.pulse_max_us = pulse_max
+
+        # Two things downstream depend on the pulse span. The board's onboard
+        # clamp is set from the endpoints, and ratio2speedUnits() converts
+        # through usPerDeg() -- so the same 0.0-1.0 speed dial means a different
+        # number of Maestro speed units once the span changes.
+        self.driver_pushFirmwareLimits()
+        self.driver_setSpeedRatio(self.speed_ratio)
+        return True, ("Pulse range set to " + str(pulse_min) + "-" + str(pulse_max) + "us")
+
+    global getMinDeg
+    def getMinDeg(self):
+        return self.limits_dict['min_hardstop_deg']
+
+    def setMinDeg(self, val):
+        return self.setDegRange(new_min = val)
+
+    global getMaxDeg
+    def getMaxDeg(self):
+        return self.limits_dict['max_hardstop_deg']
+
+    def setMaxDeg(self, val):
+        return self.setDegRange(new_max = val)
+
+    def setDegRange(self, new_min = None, new_max = None):
+        # The servo's mechanical travel. Open loop, so nothing can measure this
+        # -- the operator finds the hardstops and declares them here, and can
+        # come back to the factory defaults with a settings reset.
+        try:
+            min_deg = self.limits_dict['min_hardstop_deg'] if new_min is None else float(new_min)
+            max_deg = self.limits_dict['max_hardstop_deg'] if new_max is None else float(new_max)
+        except Exception as e:
+            return False, "Degree limit is not a number: " + str(e)
+
+        for val in [min_deg, max_deg]:
+            if val < self.DEG_MIN or val > self.DEG_MAX:
+                return False, ("Degree limit " + str(val) + " is outside the supported range " +
+                               str(self.DEG_MIN) + " to " + str(self.DEG_MAX))
+        if (max_deg - min_deg) < self.MIN_DEG_SPAN:
+            return False, ("Rejecting degree range " + str(min_deg) + " to " + str(max_deg) +
+                           ": span must be at least " + str(self.MIN_DEG_SPAN) + " deg")
+
+        # Hand the new travel to the SVX IF first, so its soft-limit validation
+        # matches, and let it pull the softstops in if they now sit outside.
+        # Going through the IF BEFORE updating our own map matters: the IF
+        # enforces its own minimum span (MIN_LIMIT_ANGLE), which is stricter than
+        # MIN_DEG_SPAN above, and a range it rejects must not leave this node
+        # converting degrees over a range the IF has never heard of.
+        #
+        # Guarded because SettingsIF can apply a persisted value before the IF
+        # finishes coming up -- in that case the constructor reads
+        # FACTORY_LIMITS_DICT and picks the new range up anyway.
+        if self.svx_if is not None:
+            if self.svx_if.setHardstopLimits(min_deg, max_deg) == False:
+                return False, ("SVX interface rejected degree range " + str(min_deg) +
+                               " to " + str(max_deg))
+
+        for limits in [self.FACTORY_LIMITS_DICT, self.limits_dict]:
+            limits['min_hardstop_deg'] = min_deg
+            limits['max_hardstop_deg'] = max_deg
+        # Keep the factory softstops in step, so a device reset restores a
+        # softstop range that still fits inside the declared travel.
+        self.FACTORY_LIMITS_DICT['min_softstop_deg'] = min_deg
+        self.FACTORY_LIMITS_DICT['max_softstop_deg'] = max_deg
+
+        # Speed units are per degree, so the dial has to be re-pushed here too.
+        self.driver_setSpeedRatio(self.speed_ratio)
+        return True, ("Degree range set to " + str(min_deg) + " to " + str(max_deg))
+
+    global getAccelUnits
+    def getAccelUnits(self):
+        return self.accel_units
+
+    def setAccelUnits(self, val):
+        try:
+            units = int(float(val))
+        except Exception as e:
+            return False, "Acceleration is not a number: " + str(e)
+        if units < self.ACCEL_UNITS_MIN or units > self.ACCEL_UNITS_MAX:
+            return False, ("Acceleration " + str(units) + " is outside the supported range " +
+                           str(self.ACCEL_UNITS_MIN) + "-" + str(self.ACCEL_UNITS_MAX))
+        self.accel_units = units
+        self.driver_setAcceleration(units)
+        return True, ("Acceleration set to " + str(units) + " units")
 
 
     #######################
@@ -481,9 +630,16 @@ class SvxServoMaestroNode:
     # Pure linear map; reverse-axis handling lives in the SVX IF, not here.
 
     def deg2us(self, deg):
+        # The degree span is a live setting now, so guard the division rather
+        # than trust the value. setDegRange() enforces MIN_DEG_SPAN, which makes
+        # this unreachable -- but an unreachable guard is cheaper than a
+        # ZeroDivisionError on every move command if that ever stops being true.
         min_deg = self.FACTORY_LIMITS_DICT['min_hardstop_deg']
         max_deg = self.FACTORY_LIMITS_DICT['max_hardstop_deg']
-        frac = (deg - min_deg) / (max_deg - min_deg)
+        span_deg = (max_deg - min_deg)
+        if span_deg == 0:
+            return self.pulse_min_us
+        frac = (deg - min_deg) / span_deg
         us = self.pulse_min_us + frac * (self.pulse_max_us - self.pulse_min_us)
         # Never let a conversion escape the servo's pulse-width endpoints.
         return max(self.pulse_min_us, min(self.pulse_max_us, us))
@@ -491,7 +647,10 @@ class SvxServoMaestroNode:
     def us2deg(self, us):
         min_deg = self.FACTORY_LIMITS_DICT['min_hardstop_deg']
         max_deg = self.FACTORY_LIMITS_DICT['max_hardstop_deg']
-        frac = (us - self.pulse_min_us) / (self.pulse_max_us - self.pulse_min_us)
+        span_us = (self.pulse_max_us - self.pulse_min_us)
+        if span_us == 0:
+            return min_deg
+        frac = (us - self.pulse_min_us) / span_us
         return min_deg + frac * (max_deg - min_deg)
 
     def deg2target(self, deg):

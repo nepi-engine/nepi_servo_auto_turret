@@ -200,7 +200,16 @@ class NepiDeviceSVX extends Component {
 
                       {(device_selected === true) ?
                       <NepiIFSettings
-                        settingsNamespace={namespace + '/settings'}
+                        settingsNamespace={
+                          // Settings live at <node>/settings, NOT <node>/svx/settings.
+                          // SettingsIF takes a namespace argument but ignores it, building
+                          // its own from the node name instead (system_if.py:
+                          // create_namespace(self.node_name, settings_name)), so the
+                          // settings topics sit one level up from this device's svx
+                          // namespace. Split on '/svx' the same way createDeviceOptions
+                          // does above.
+                          namespace.split('/svx')[0] + '/settings'
+                        }
                         allways_show_settings={true}
                         make_section={true}
                         title={"Device Settings"}

@@ -84,17 +84,13 @@ class SvxServoMaestroDiscovery:
 
     retry = True
 
-    # Discovery options (populated from drv_dict each pass). The calibration
-    # options are kept as raw strings here; they are parsed per board, against
-    # that board's resolved channel list, in channelCalibration().
+    # Discovery options (populated from drv_dict each pass). All board-level --
+    # anything describing an individual servo (pulse endpoints, degree range,
+    # acceleration) belongs to the servo node, not here.
     channels_str = 'all'
     baud_str = '9600'
     device_number = 12
     command_port_index = 0
-    pulse_min_us_str = '500'
-    pulse_max_us_str = '2300'
-    min_deg_str = '-90'
-    max_deg_str = '90'
 
 
     ################################################
@@ -114,21 +110,13 @@ class SvxServoMaestroDiscovery:
         self.base_namespace = base_namespace
 
         ##################################
-        # Get discovery options. Values that are per-channel are kept as raw
-        # strings -- parsing them to a single float here would raise on the
-        # comma-separated form the options explicitly support, and the enclosing
-        # except would then silently launch nothing while drivers_mgr still
-        # reported this driver as running.
+        # Get discovery options
         try:
             options = self.drv_dict.get('DISCOVERY_DICT', {}).get('OPTIONS', {})
             self.channels_str = str(options.get('channels', {}).get('value', 'all'))
             self.baud_str = str(options.get('baud_rate', {}).get('value', '9600'))
             self.device_number = int(options.get('device_number', {}).get('value', 12))
             self.command_port_index = int(options.get('command_port_index', {}).get('value', 0))
-            self.pulse_min_us_str = str(options.get('pulse_min_us', {}).get('value', '500'))
-            self.pulse_max_us_str = str(options.get('pulse_max_us', {}).get('value', '2300'))
-            self.min_deg_str = str(options.get('min_deg', {}).get('value', '-90'))
-            self.max_deg_str = str(options.get('max_deg', {}).get('value', '90'))
         except Exception as e:
             self.logger.log_warn(self.log_name + ": Failed to setup options " + str(e))
             return self.active_paths_list
@@ -161,14 +149,11 @@ class SvxServoMaestroDiscovery:
         desired_dict = dict()
         for port_info in command_ports:
             path_str = port_info['path']
-            channels_list = self.resolveChannels(port_info)
-            calibration_dict = self.channelCalibration(channels_list)
-            for channel in channels_list:
+            for channel in self.resolveChannels(port_info):
                 launch_id = path_str + ":ch" + str(channel)
                 desired_dict[launch_id] = {
                     'port_info': port_info,
-                    'channel': channel,
-                    'calibration': calibration_dict[channel]
+                    'channel': channel
                 }
 
         ### Kill any running channel that is no longer wanted (channel removed
@@ -184,7 +169,7 @@ class SvxServoMaestroDiscovery:
             entry = desired_dict[launch_id]
             if entry['port_info']['path'] in self.dont_retry_list:
                 continue
-            self.launchDeviceNode(entry['port_info'], entry['channel'], entry['calibration'])
+            self.launchDeviceNode(entry['port_info'], entry['channel'])
 
         ### Claim each board's path once any of its channels is live
         for port_info in command_ports:
@@ -250,83 +235,6 @@ class SvxServoMaestroDiscovery:
             if channel not in channels:
                 channels.append(channel)
         return channels
-
-
-    def channelCalibration(self, channels_list):
-        # Per-channel pulse-width/degree calibration, so pan and tilt on one
-        # board can use different servos. Returns {channel: {...}}.
-        pulse_min_dict = self.parseChannelFloats(self.pulse_min_us_str, channels_list, 500.0, 'pulse_min_us')
-        pulse_max_dict = self.parseChannelFloats(self.pulse_max_us_str, channels_list, 2300.0, 'pulse_max_us')
-        min_deg_dict = self.parseChannelFloats(self.min_deg_str, channels_list, -90.0, 'min_deg')
-        max_deg_dict = self.parseChannelFloats(self.max_deg_str, channels_list, 90.0, 'max_deg')
-
-        calibration_dict = dict()
-        for channel in channels_list:
-            calibration_dict[channel] = {
-                'pulse_min_us': pulse_min_dict[channel],
-                'pulse_max_us': pulse_max_dict[channel],
-                'min_deg': min_deg_dict[channel],
-                'max_deg': max_deg_dict[channel]
-            }
-        return calibration_dict
-
-
-    def parseChannelFloats(self, value, channels_list, default_value, option_name):
-        # Three accepted forms, returned as {channel: float}:
-        #   "500"          -> every channel gets 500
-        #   "500,900"      -> positional, matched to channels_list AS WRITTEN
-        #   "0:500,5:900"  -> keyed by channel number, order-independent
-        # The keyed form is preferred: with the positional form, reordering the
-        # "channels" option silently reassigns each value to a different servo,
-        # which can drive a servo past its mechanical stop.
-        tokens = [t.strip() for t in str(value).replace(';', ',').split(',') if t.strip() != '']
-        default_dict = dict()
-        for channel in channels_list:
-            default_dict[channel] = float(default_value)
-        if len(tokens) == 0:
-            return default_dict
-
-        keyed_tokens = [t for t in tokens if ':' in t]
-        if len(keyed_tokens) > 0:
-            if len(keyed_tokens) != len(tokens):
-                self.logger.log_warn("Option " + option_name + " mixes keyed and positional entries ('" +
-                                     str(value) + "'); using defaults")
-                return default_dict
-            keyed_dict = dict()
-            for tok in tokens:
-                key_str, _, val_str = tok.partition(':')
-                try:
-                    keyed_dict[int(key_str.strip())] = float(val_str.strip())
-                except Exception:
-                    self.logger.log_warn("Ignoring unparseable " + option_name + " entry: '" + tok + "'")
-            if len(keyed_dict) == 0:
-                return default_dict
-            result_dict = dict()
-            for channel in channels_list:
-                if channel in keyed_dict:
-                    result_dict[channel] = keyed_dict[channel]
-                else:
-                    self.logger.log_warn("Option " + option_name + " has no entry for channel " +
-                                         str(channel) + "; using default " + str(default_value))
-                    result_dict[channel] = float(default_value)
-            return result_dict
-
-        floats = []
-        for tok in tokens:
-            try:
-                floats.append(float(tok))
-            except Exception:
-                self.logger.log_warn("Ignoring unparseable " + option_name + " entry: '" + tok + "'")
-        if len(floats) == 0:
-            return default_dict
-        # Shorter-than-needed lists repeat their last entry so a single shared
-        # value keeps working for anyone not using per-channel calibration.
-        while len(floats) < len(channels_list):
-            floats.append(floats[-1])
-        result_dict = dict()
-        for i, channel in enumerate(channels_list):
-            result_dict[channel] = floats[i]
-        return result_dict
 
 
     def findCommandPorts(self):
@@ -404,7 +312,7 @@ class SvxServoMaestroDiscovery:
         return safe_id
 
 
-    def launchDeviceNode(self, port_info, channel, calibration):
+    def launchDeviceNode(self, port_info, channel):
         path_str = port_info['path']
         launch_id = path_str + ":ch" + str(channel)
         if launch_id in self.active_devices_dict:
@@ -413,13 +321,15 @@ class SvxServoMaestroDiscovery:
         file_name = self.drv_dict['NODE_DICT']['file_name']
         device_name = self.node_launch_name + "_" + self.boardIdString(port_info) + "_ch" + str(channel)
         node_name = nepi_system.get_device_alias(device_name)
-        self.logger.log_info("Launching node: " + node_name + " on channel " + str(channel) +
-                             " with " + str(calibration['pulse_min_us']) + "-" +
-                             str(calibration['pulse_max_us']) + "us over " +
-                             str(calibration['min_deg']) + " to " + str(calibration['max_deg']) + " deg")
+        self.logger.log_info("Launching node: " + node_name + " on channel " + str(channel))
 
         # Setup required param server drv_dict for the node. Deep-copied per
         # launch so the DEVICE_DICT of one channel can never leak into another's.
+        #
+        # Only board-level facts go in here. The servo's own calibration (pulse
+        # endpoints, degree range, acceleration) is owned by the node as its own
+        # settings, persisted per device -- discovery must not overwrite an
+        # operator's calibration every time it relaunches a channel.
         node_drv_dict = copy.deepcopy(self.drv_dict)
         node_drv_dict['DEVICE_DICT'] = {
             'device_name': device_name,
@@ -427,13 +337,7 @@ class SvxServoMaestroDiscovery:
             'channel': channel,
             'baud_str': self.baud_str,
             'device_number': self.device_number,
-            'serial_number': port_info['serial_number'],
-            # This channel's own calibration (see parseChannelFloats above) --
-            # lets pan and tilt on the same board have different servos/ranges.
-            'pulse_min_us': calibration['pulse_min_us'],
-            'pulse_max_us': calibration['pulse_max_us'],
-            'min_deg': calibration['min_deg'],
-            'max_deg': calibration['max_deg']
+            'serial_number': port_info['serial_number']
         }
         dict_param_name = nepi_sdk.create_namespace(self.base_namespace, node_name + "/drv_dict")
         nepi_sdk.set_param(dict_param_name, node_drv_dict)

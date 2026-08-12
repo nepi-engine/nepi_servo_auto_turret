@@ -762,6 +762,55 @@ class SVXActuatorIF:
         self.publish_status()
 
 
+    def setHardstopLimits(self, min_deg, max_deg):
+        # Update the servo's mechanical range after construction. Hardstops are
+        # otherwise write-once from factoryLimits, but an open-loop servo has no
+        # way to report its own travel -- the operator finds it and declares it,
+        # so the driver needs to be able to hand a corrected range back to us.
+        #
+        # Values arrive in the driver's own (non-reversed) frame, the same frame
+        # factoryLimits and the stored softstops use, so no reverse-axis
+        # conversion applies here. Reversal is applied at the edges instead:
+        # _setSoftLimitsCb converts incoming requests before comparing.
+        min_deg = float(min_deg)
+        max_deg = float(max_deg)
+        if min_deg >= max_deg or abs(max_deg - min_deg) < self.MIN_LIMIT_ANGLE:
+            self.msg_if.pub_warn("Rejecting invalid hardstop range " +
+                                 str(min_deg) + " to " + str(max_deg))
+            return False
+
+        self.min_hardstop_deg = min_deg
+        self.max_hardstop_deg = max_deg
+
+        # Pull the softstops back inside the new range. Leaving one outside would
+        # strand it: _setSoftLimitsCb validates against the hardstops, so the
+        # operator could no longer set a valid limit without first widening the
+        # range again.
+        new_min = max(self.min_softstop_deg, min_deg)
+        new_max = min(self.max_softstop_deg, max_deg)
+        if new_min >= new_max or abs(new_max - new_min) < self.MIN_LIMIT_ANGLE:
+            # Nothing usable survived the clamp -- open the softstops back up to
+            # the full new range rather than leave an unusable sliver.
+            new_min = min_deg
+            new_max = max_deg
+
+        softstops_changed = (new_min != self.min_softstop_deg or new_max != self.max_softstop_deg)
+        if softstops_changed:
+            self.min_softstop_deg = new_min
+            self.max_softstop_deg = new_max
+            if self.setSoftLimitsCb is not None:
+                self.setSoftLimitsCb(new_min, new_max)
+            if self.node_if is not None:
+                self.node_if.set_param('min_softstop_deg', new_min)
+                self.node_if.set_param('max_softstop_deg', new_max)
+            self.msg_if.pub_info("Softstops clamped to new hardstop range: " +
+                                 str(new_min) + " to " + str(new_max))
+
+        self.msg_if.pub_info("Set hardstop range to " + str(min_deg) + " to " + str(max_deg))
+        self.publish_status()
+        return True
+
+
     def _stopMovingCb(self, _):
         self.msg_if.pub_warn("Got Stop Moving msg")
         self.stopServo()

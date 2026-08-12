@@ -15,7 +15,11 @@ moves, and speed smoothing. A bare 3-wire PWM servo has none of that:
 
 - it is a **single axis**, so every dual-axis PTX field, control, and callback collapses to one;
 - it is **open loop** — it reports nothing, so "current position" is just the last commanded value;
-- it has **no hardstops to calibrate** and **no navigation role**, so calibration and NavPose are dropped.
+- its hardstops **cannot be discovered**, only declared — nothing can measure them, so the
+  automatic centre-finding calibration routine is dropped. The hardstops themselves stay:
+  the operator finds their servo's real travel by hand, enters it as that servo's `min_deg`/
+  `max_deg` setting, and can return to the factory defaults with a settings reset;
+- it has **no navigation role**, so NavPose is dropped.
 
 A pan/tilt turret is therefore **two SVX instances**; coordinating them belongs to the
 application layer (`nepi_app_servo_auto`), not to `SVXActuatorIF`.
@@ -70,8 +74,11 @@ Controller**.
   advisory `fcntl.flock` on the port, so multiple channel nodes can share one board's USB
   port without interleaving bytes.
 - `svx_servo_maestro_params.yaml` — driver metadata (`type: SVX`) plus discovery OPTIONS:
-  `channels`, `protocol`, `device_number`, `command_port_index`, `baud_rate`,
-  `pulse_min_us`/`pulse_max_us`, `min_deg`/`max_deg`, `accel_units`.
+  `channels`, `protocol`, `device_number`, `command_port_index`, `baud_rate`. All
+  board-level. Per-servo calibration (`pulse_min_us`/`pulse_max_us`, `min_deg`/`max_deg`,
+  `accel_units`) is deliberately **not** here — those describe the servo rather than the
+  controller, so each servo node owns them as its own settings, adjustable live in that
+  device's Settings panel and persisted per device.
 
 `svx_drivers/svx_servo_generic_*` — retained board-agnostic **stub** (no hardware I/O),
 kept as the starting point for a future board (e.g. a custom-firmware ESP32). Its
