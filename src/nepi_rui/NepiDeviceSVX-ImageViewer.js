@@ -33,7 +33,6 @@ import Button, { ButtonMenu } from "./Button"
 import { Column, Columns } from "./Columns"
 
 
-import { SliderAdjustment } from "./AdjustmentWidgets"
 
 import NepiIFImageViewerSelector from "./Nepi_IF_ImageViewerSelector"
 import NepiIFImageViewersSelector from "./Nepi_IF_ImageViewerSelector"
@@ -136,22 +135,12 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
 
 
-    var positionGoalRatio = 0.5
-    if (status_msg != null){
-      positionGoalRatio = status_msg.position_goal_ratio
-    }
-
-
     const svxDevicesList = Object.keys(svxDevices)
-    var has_abs_pos = false
     var has_stop_control = false
     if (svxDevicesList.indexOf(namespace) !== -1){
       const svx_caps = svxDevices[namespace]
-      has_abs_pos = svx_caps && (svx_caps.has_absolute_positioning === true)
       has_stop_control = svx_caps && (svx_caps.has_stop_control === true)
     }
-
-    const show_sv_controls = (has_abs_pos === true)
 
 
     return (
@@ -187,24 +176,6 @@ componentDidUpdate(prevProps, prevState, snapshot) {
           </Column>
         </Columns>
 
-
-
-              <div hidden={show_sv_controls === false}>
-
-                  <SliderAdjustment
-                    title={"Position"}
-                    msgType={"std_msgs/Float32"}
-                    adjustment={positionGoalRatio}
-                    topic={namespace + "/goto_ratio"}
-                    scaled={0.01}
-                    min={0}
-                    max={100}
-                    tooltip={"Position as a percentage (0%=min, 100%=max)"}
-                    unit={"%"}
-                    noTextBox={true}
-                    noLabel={true}
-                  />
-              </div>
 
 
               <div hidden={has_stop_control === false}>

@@ -37,7 +37,7 @@ from std_msgs.msg import Empty, Int8, UInt8, UInt32, Int32, Bool, String, Float3
 
 from nepi_interfaces.srv import DeviceInfoQuery, DeviceInfoQueryResponse, DeviceInfoQueryRequest
 
-from nepi_interfaces.msg import DeviceSVXStatus, ServoLimits
+from nepi_interfaces.msg import DeviceSVXStatus
 from nepi_interfaces.srv import SVXCapabilitiesQuery, SVXCapabilitiesQueryRequest, SVXCapabilitiesQueryResponse
 
 
@@ -210,12 +210,12 @@ class SVXActuatorIF:
         # Open loop: getPositionCb returns the last commanded position, nothing measured
         self.getPositionCb = getPositionCb
 
-        # Soft Limits are handled by SVX IF at top level,
-        # these are for updating the hardware if required
+        # Soft limits removed: the hardstops are the single clamp range. The driver
+        # callbacks are still kept so the hard range can be pushed to any hardware
+        # clamp (see setHardstopLimits), but the operator-adjustable soft band and
+        # its set_soft_limits control topic are gone. has_limit_controls stays False.
         self.setSoftLimitsCb = setSoftLimitsCb
         self.getSoftLimitsCb = getSoftLimitsCb
-        if self.getSoftLimitsCb is not None:
-            self.has_limit_controls = True
 
         # POSITION MOVE ############
         self.gotoPositionCb = gotoPositionCb
@@ -275,8 +275,10 @@ class SVXActuatorIF:
 
         self.min_hardstop_deg = self.factoryLimits['min_hardstop_deg']
         self.max_hardstop_deg = self.factoryLimits['max_hardstop_deg']
-        self.min_softstop_deg = self.factoryLimits['min_softstop_deg']
-        self.max_softstop_deg = self.factoryLimits['max_softstop_deg']
+        # Soft band removed: softstops permanently mirror the hardstops (the single
+        # clamp range). Nothing else writes them independently anymore.
+        self.min_softstop_deg = self.min_hardstop_deg
+        self.max_softstop_deg = self.max_hardstop_deg
 
 
         ########################
@@ -331,14 +333,6 @@ class SVXActuatorIF:
             'spin_direction': {
                 'namespace': self.namespace,
                 'factory_val': self.factory_controls_dict['spin_direction']
-            },
-            'max_softstop_deg': {
-                'namespace': self.namespace,
-                'factory_val': self.factoryLimits['max_softstop_deg']
-            },
-            'min_softstop_deg': {
-                'namespace': self.namespace,
-                'factory_val': self.factoryLimits['min_softstop_deg']
             },
             'move_decimal_place': {
                 'namespace': self.namespace,
@@ -405,14 +399,6 @@ class SVXActuatorIF:
                 'msg': Float32,
                 'qsize': 1,
                 'callback': self._gotoRatioCb,
-                'callback_args': ()
-            },
-            'set_soft_limits': {
-                'namespace': self.namespace,
-                'topic': 'set_soft_limits',
-                'msg': ServoLimits,
-                'qsize': 1,
-                'callback': self._setSoftLimitsCb,
                 'callback_args': ()
             },
             'set_speed_ratio': {
@@ -559,24 +545,14 @@ class SVXActuatorIF:
 
 
     def initCb(self, do_updates = False):
-        if do_updates == True and self.node_if is not None:
-            # This one comes from the parent
-            if self.getSoftLimitsCb is not None:
-                    [min_deg,max_deg] = self.getSoftLimitsCb()
-                    if min_deg != -999:
-                        self.min_softstop_deg = min_deg
-                        self.node_if.set_param('min_softstop_deg', self.min_softstop_deg)
-                    if max_deg != -999:
-                        self.max_softstop_deg = max_deg
-                        self.node_if.set_param('max_softstop_deg', self.max_softstop_deg)
-
         if self.node_if is not None:
-            self.min_softstop_deg = self.node_if.get_param('min_softstop_deg')
-            self.max_softstop_deg = self.node_if.get_param('max_softstop_deg')
-
-            if None not in [self.min_softstop_deg,self.max_softstop_deg]:
-                if self.setSoftLimitsCb is not None:
-                    self.setSoftLimitsCb(self.min_softstop_deg, self.max_softstop_deg)
+            # Soft band removed: softstops mirror the hardstops and are pushed to any
+            # hardware clamp here (hardstops themselves come from the driver via
+            # setHardstopLimits, e.g. the Maestro's min_deg/max_deg settings).
+            self.min_softstop_deg = self.min_hardstop_deg
+            self.max_softstop_deg = self.max_hardstop_deg
+            if self.setSoftLimitsCb is not None:
+                self.setSoftLimitsCb(self.min_softstop_deg, self.max_softstop_deg)
 
             if self.getSpeedMaxCb is None:
                 self.speed_max_dps = self.node_if.get_param('speed_max_dps')
@@ -739,39 +715,18 @@ class SVXActuatorIF:
 
 
 
-    def _setSoftLimitsCb(self, msg):
-        min_deg = msg.min_deg
-        max_deg = msg.max_deg
-
-        [min_adj,max_adj] = self.getLimitsAdj(min_deg,max_deg)
-
-        valid = False
-        if min_adj >= self.min_hardstop_deg and max_adj <= self.max_hardstop_deg and min_adj < max_adj:
-            if abs(max_adj - min_adj) >= self.MIN_LIMIT_ANGLE:
-                valid = True
-                self.min_softstop_deg = min_adj
-                self.max_softstop_deg = max_adj
-                if self.setSoftLimitsCb is not None:
-                    self.setSoftLimitsCb(min_adj,max_adj)
-                if self.node_if is not None:
-                    self.node_if.set_param('max_softstop_deg', max_adj)
-                    self.node_if.set_param('min_softstop_deg', min_adj)
-
-        if valid == False:
-            self.msg_if.pub_warn("Invalid softstop requested " + str(msg))
-        self.publish_status()
-
-
     def setHardstopLimits(self, min_deg, max_deg):
         # Update the servo's mechanical range after construction. Hardstops are
         # otherwise write-once from factoryLimits, but an open-loop servo has no
-        # way to report its own travel -- the operator finds it and declares it,
-        # so the driver needs to be able to hand a corrected range back to us.
+        # way to report its own travel -- the operator finds it and declares it
+        # (e.g. the Maestro's min_deg/max_deg settings), so the driver needs to be
+        # able to hand a corrected range back to us.
         #
         # Values arrive in the driver's own (non-reversed) frame, the same frame
-        # factoryLimits and the stored softstops use, so no reverse-axis
-        # conversion applies here. Reversal is applied at the edges instead:
-        # _setSoftLimitsCb converts incoming requests before comparing.
+        # factoryLimits uses, so no reverse-axis conversion applies here.
+        #
+        # Soft limits were removed: the hardstops are the single clamp range, so the
+        # softstops simply mirror them and are pushed to any hardware clamp.
         min_deg = float(min_deg)
         max_deg = float(max_deg)
         if min_deg >= max_deg or abs(max_deg - min_deg) < self.MIN_LIMIT_ANGLE:
@@ -781,30 +736,10 @@ class SVXActuatorIF:
 
         self.min_hardstop_deg = min_deg
         self.max_hardstop_deg = max_deg
-
-        # Pull the softstops back inside the new range. Leaving one outside would
-        # strand it: _setSoftLimitsCb validates against the hardstops, so the
-        # operator could no longer set a valid limit without first widening the
-        # range again.
-        new_min = max(self.min_softstop_deg, min_deg)
-        new_max = min(self.max_softstop_deg, max_deg)
-        if new_min >= new_max or abs(new_max - new_min) < self.MIN_LIMIT_ANGLE:
-            # Nothing usable survived the clamp -- open the softstops back up to
-            # the full new range rather than leave an unusable sliver.
-            new_min = min_deg
-            new_max = max_deg
-
-        softstops_changed = (new_min != self.min_softstop_deg or new_max != self.max_softstop_deg)
-        if softstops_changed:
-            self.min_softstop_deg = new_min
-            self.max_softstop_deg = new_max
-            if self.setSoftLimitsCb is not None:
-                self.setSoftLimitsCb(new_min, new_max)
-            if self.node_if is not None:
-                self.node_if.set_param('min_softstop_deg', new_min)
-                self.node_if.set_param('max_softstop_deg', new_max)
-            self.msg_if.pub_info("Softstops clamped to new hardstop range: " +
-                                 str(new_min) + " to " + str(new_max))
+        self.min_softstop_deg = min_deg
+        self.max_softstop_deg = max_deg
+        if self.setSoftLimitsCb is not None:
+            self.setSoftLimitsCb(min_deg, max_deg)
 
         self.msg_if.pub_info("Set hardstop range to " + str(min_deg) + " to " + str(max_deg))
         self.publish_status()

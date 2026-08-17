@@ -201,14 +201,14 @@ class NepiDeviceSVX extends Component {
                       {(device_selected === true) ?
                       <NepiIFSettings
                         settingsNamespace={
-                          // Settings live at <node>/settings, NOT <node>/svx/settings.
-                          // SettingsIF takes a namespace argument but ignores it, building
-                          // its own from the node name instead (system_if.py:
-                          // create_namespace(self.node_name, settings_name)), so the
-                          // settings topics sit one level up from this device's svx
-                          // namespace. Split on '/svx' the same way createDeviceOptions
-                          // does above.
-                          namespace.split('/svx')[0] + '/settings'
+                          // SettingsIF now honors the device namespace it is handed, so the
+                          // servo's settings live under this device's svx namespace at
+                          // <node>/svx/settings (confirmed on-device: settings_topic =
+                          // /nepi/.../maestro_..._ch0/svx/settings). Prefer the exact path
+                          // the node reports in its status; fall back to deriving it.
+                          (capabilities && capabilities.settings_topic)
+                            ? capabilities.settings_topic
+                            : namespace + '/settings'
                         }
                         allways_show_settings={true}
                         make_section={true}

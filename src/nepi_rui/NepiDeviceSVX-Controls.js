@@ -19,14 +19,16 @@
  */
 
 // SVX (servo) controls panel.
-// One SVX device = one servo. Controls are drawn conditionally on the Figure 4
-// capability flags reported by the device. All field/topic names match the
-// DeviceSVXStatus msg (Figure 3), SVXCapabilitiesQuery srv (Figure 4), and the
-// Figure 5 control topics. Editable inputs follow the authoritative RUI pattern.
+// One SVX device = one servo. Controls are drawn conditionally on the capability
+// flags reported by the device (SVXCapabilitiesQuery). A servo is EITHER positional
+// (has_absolute_positioning) OR continuous-rotation (has_spin_control); the bottom
+// slider adapts to whichever the device reports. Soft limits were removed -- the
+// hardstops are the single clamp range -- so there are no soft-limit inputs here.
 
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 import Toggle from "react-toggle"
+import Slider from "rc-slider"
 
 import Section from "./Section"
 import { Columns, Column } from "./Columns"
@@ -53,16 +55,29 @@ class NepiDeviceSVXControls extends Component {
       namespace : null,
       status_msg: null,
 
-      speedMax: 0.0,
-
       show_controls: false,
 
+      // Continuous-spinning mode toggle (UI-local). When on, the controls switch
+      // from degree position to direction+speed; the bipolar slider publishes to the
+      // existing set_spin_direction / set_speed_ratio topics.
+      spinning_mode: false,
+
       homePos : null,
-      softStopMin : null,
-      softStopMax : null,
       gotoPos : null,
 
+      // Position readout unit toggle: false = degrees, true = PWM microseconds.
+      show_pwm : false,
+      // pulse_min_us / pulse_max_us read from the device's own settings (node-owned).
+      // Null until the settings arrive; the PWM toggle stays disabled while null.
+      pulseMin : null,
+      pulseMax : null,
+
+      // Local handle position for the continuous-mode bipolar slider while dragging.
+      bipolar : null,
+
       statusListener: null,
+      settingsTopic: null,
+      settingsListener: null,
 
     }
 
@@ -71,10 +86,18 @@ class NepiDeviceSVXControls extends Component {
     this.onKeyText = this.onKeyText.bind(this)
 
     this.renderControlPanel = this.renderControlPanel.bind(this)
+    this.renderSettings = this.renderSettings.bind(this)
     this.renderDeviceIF = this.renderDeviceIF.bind(this)
 
     this.updateStatusListener = this.updateStatusListener.bind(this)
     this.statusListener = this.statusListener.bind(this)
+    this.updateSettingsListener = this.updateSettingsListener.bind(this)
+    this.settingsListener = this.settingsListener.bind(this)
+
+    this.degToPwm = this.degToPwm.bind(this)
+    this.pwmAvailable = this.pwmAvailable.bind(this)
+    this.posDisplay = this.posDisplay.bind(this)
+    this.onBipolarChange = this.onBipolarChange.bind(this)
   }
 
 
@@ -85,10 +108,14 @@ class NepiDeviceSVXControls extends Component {
       status_msg: message
     })
 
-    const speedMax = message.speed_max_dps
+    // Subscribe to the device's settings the first time we learn where they live,
+    // and re-subscribe if the settings topic ever changes. pulse_min_us/pulse_max_us
+    // are node-owned settings and are what the PWM readout needs.
+    if (message.settings_topic && message.settings_topic !== this.state.settingsTopic) {
+      this.updateSettingsListener(message.settings_topic)
+    }
+
     const homePos = message.home_pos_deg
-    const softStopMin = message.min_softstop_deg
-    const softStopMax = message.max_softstop_deg
 
     var needs_update = false
     if (last_status_msg == null){
@@ -96,18 +123,12 @@ class NepiDeviceSVXControls extends Component {
     }
     else {
        needs_update = (
-          speedMax !== last_status_msg.speed_max_dps ||
-          homePos !== last_status_msg.home_pos_deg ||
-          softStopMin !== last_status_msg.min_softstop_deg ||
-          softStopMax !== last_status_msg.max_softstop_deg
+          homePos !== last_status_msg.home_pos_deg
       )
     }
     if (needs_update === true){
       this.setState({
-          speedMax: speedMax,
-          homePos : round(message.home_pos_deg, 1),
-          softStopMin : round(message.min_softstop_deg, 1),
-          softStopMax : round(message.max_softstop_deg, 1)
+          homePos : round(message.home_pos_deg, 1)
       })
     }
 
@@ -120,8 +141,6 @@ class NepiDeviceSVXControls extends Component {
       this.state.statusListener.unsubscribe()
        this.setState({ status_msg: null, statusListener: null})
       this.setState({homePos : null,
-                    softStopMin : null,
-                    softStopMax : null,
                     gotoPos : null
       })
     }
@@ -135,6 +154,41 @@ class NepiDeviceSVXControls extends Component {
     this.setState({ namespace: namespace})
 
 }
+
+  // Subscribe to the device's SettingsStatus so we can read pulse_min_us/pulse_max_us
+  // for the degrees<->PWM readout conversion. Those are per-servo, node-owned settings
+  // (e.g. the Maestro exposes them); a servo that does not expose them simply leaves
+  // the PWM toggle disabled.
+  updateSettingsListener(settings_topic) {
+    if (this.state.settingsListener != null) {
+      this.state.settingsListener.unsubscribe()
+      this.setState({ settingsListener: null, pulseMin: null, pulseMax: null })
+    }
+    if (settings_topic) {
+      // The SettingsStatus is published at "<settings_topic>/status" (matches
+      // Nepi_IF_Settings.js in the base RUI).
+      const settingsListener = this.props.ros.setupSettingsStatusListener(
+        settings_topic + '/status',
+        this.settingsListener
+      )
+      this.setState({ settingsListener: settingsListener })
+    }
+    this.setState({ settingsTopic: settings_topic })
+  }
+
+  settingsListener(message) {
+    const list = (message && message.settings_list) ? message.settings_list : []
+    var pmin = null
+    var pmax = null
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i]
+      if (s.name_str === "pulse_min_us") { pmin = Number(s.value_str) }
+      else if (s.name_str === "pulse_max_us") { pmax = Number(s.value_str) }
+    }
+    if (pmin !== this.state.pulseMin || pmax !== this.state.pulseMax) {
+      this.setState({ pulseMin: pmin, pulseMax: pmax })
+    }
+  }
 
 // Lifecycle method called when component updates.
 // Used to track changes in the topic
@@ -156,23 +210,47 @@ componentDidUpdate(prevProps, prevState, snapshot) {
       this.state.statusListener.unsubscribe()
       this.setState({statusListener : null})
     }
+    if (this.state.settingsListener) {
+      this.state.settingsListener.unsubscribe()
+      this.setState({settingsListener : null})
+    }
+  }
+
+
+  // Linear degrees -> pulse-width (microseconds). Maps the device's declared travel
+  // (min/max_softstop_deg, which now carry the hardstop range) onto its pulse
+  // endpoints. Returns null when the pulse settings are not (yet) available.
+  degToPwm(deg) {
+    const status = this.state.status_msg
+    const pmin = this.state.pulseMin
+    const pmax = this.state.pulseMax
+    if (status == null || pmin == null || pmax == null || isNaN(pmin) || isNaN(pmax)) {
+      return null
+    }
+    const dmin = status.min_softstop_deg
+    const dmax = status.max_softstop_deg
+    const span = dmax - dmin
+    if (span === 0) { return pmin }
+    const t = (deg - dmin) / span
+    return pmin + t * (pmax - pmin)
+  }
+
+  pwmAvailable() {
+    return (this.state.pulseMin != null && this.state.pulseMax != null &&
+            !isNaN(this.state.pulseMin) && !isNaN(this.state.pulseMax))
+  }
+
+  // Format a position for a read-only field, honoring the degrees/PWM toggle.
+  posDisplay(deg) {
+    if (this.state.show_pwm === true && this.pwmAvailable()) {
+      return round(this.degToPwm(deg), 0).toString() + " µs"
+    }
+    return round(deg, 2).toString() + "°"
   }
 
 
   onUpdateText(e) {
-    if (e.target.id === "SVXSoftStopMin")
-    {
-      const el = document.getElementById("SVXSoftStopMin")
-      setElementStyleModified(el)
-      this.setState({softStopMin: e.target.value})
-    }
-    else if (e.target.id === "SVXSoftStopMax")
-    {
-      const el = document.getElementById("SVXSoftStopMax")
-      setElementStyleModified(el)
-      this.setState({softStopMax: e.target.value})
-    }
-    else if (e.target.id === "SVXHomePos")
+    if (e.target.id === "SVXHomePos")
     {
       const el = document.getElementById("SVXHomePos")
       setElementStyleModified(el)
@@ -184,12 +262,6 @@ componentDidUpdate(prevProps, prevState, snapshot) {
       setElementStyleModified(el)
       this.setState({gotoPos: e.target.value})
     }
-    else if (e.target.id === "SVXMaxSpeed")
-    {
-      const el = document.getElementById("SVXMaxSpeed")
-      setElementStyleModified(el)
-      this.setState({speedMax: e.target.value})
-    }
   }
 
   onKeyText(e) {
@@ -198,21 +270,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
     if(e.key === 'Enter'){
 
-      if ((e.target.id === "SVXSoftStopMin") || (e.target.id === "SVXSoftStopMax"))
-      {
-        const minEl = document.getElementById("SVXSoftStopMin")
-        const maxEl = document.getElementById("SVXSoftStopMax")
-        clearElementStyleModified(minEl)
-        clearElementStyleModified(maxEl)
-        // set_soft_limits control: ServoLimits msg {min_deg, max_deg}
-        this.props.ros.publishMessage({
-          name: namespace + "/set_soft_limits",
-          messageType: "nepi_interfaces/ServoLimits",
-          data: {"min_deg": Number(minEl.value), "max_deg": Number(maxEl.value)},
-          noPrefix: true
-        })
-      }
-      else if (e.target.id === "SVXHomePos")
+      if (e.target.id === "SVXHomePos")
       {
         const el = document.getElementById("SVXHomePos")
         clearElementStyleModified(el)
@@ -225,38 +283,38 @@ componentDidUpdate(prevProps, prevState, snapshot) {
         sendFloatMsg(namespace + "/goto_position", el.value)
         this.setState({gotoPos: null})
       }
-      else if (e.target.id === "SVXMaxSpeed")
-      {
-        const el = document.getElementById("SVXMaxSpeed")
-        clearElementStyleModified(el)
-        sendFloatMsg(namespace + "/set_speed_max_dps", el.value)
-      }
     }
+  }
+
+  // Continuous mode: one bipolar slider (-100..0..+100). Sign is the spin direction,
+  // magnitude is the speed ratio. Publishes to the two existing control topics.
+  onBipolarChange(value) {
+    const { sendIntMsg, sendFloatMsg } = this.props.ros
+    const namespace = (this.props.namespace !== undefined) ? this.props.namespace : 'None'
+    const v = Number(value)
+    const dir = (v >= 0) ? 1 : -1
+    const ratio = Math.abs(v) / 100.0
+    sendIntMsg(namespace + "/set_spin_direction", dir)
+    sendFloatMsg(namespace + "/set_speed_ratio", ratio)
   }
 
 
   renderControlPanel() {
 
-    const { sendBoolMsg, sendTriggerMsg } = this.props.ros
+    const { sendTriggerMsg } = this.props.ros
     const namespace = this.props.namespace ? this.props.namespace : 'None'
     const status_msg = this.state.status_msg
 
     const devices = this.props.ros.svxDevices
-    var has_limit_control = false
     var has_homing = false
     var has_set_home = false
     const devicesList = Object.keys(devices)
     if (devicesList.indexOf(namespace) !== -1){
       const capabilities = devices[namespace]
-      has_limit_control = capabilities && (capabilities.has_limit_control === true)
       has_homing = capabilities && (capabilities.has_homing === true)
       has_set_home = capabilities && (capabilities.has_set_home === true)
     }
 
-    const reverseEnabled = status_msg.reverse_enabled
-
-    const softStopMin = this.state.softStopMin
-    const softStopMax = this.state.softStopMax
     const homePos = this.state.homePos
 
     const show_controls =  this.state.show_controls
@@ -284,36 +342,6 @@ componentDidUpdate(prevProps, prevState, snapshot) {
               <div hidden={(show_controls===false)}>
 
               <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
-
-                    <Label title={"Reverse Control"}>
-                      <Toggle checked={reverseEnabled} onClick={() => sendBoolMsg.bind(this)(namespace + "/set_reverse_enable",!reverseEnabled)} />
-                    </Label>
-
-
-                    <div hidden={(has_limit_control === false)}>
-
-                            <Label title={"Soft Limit Min"}>
-                              <Input
-                                disabled={!has_limit_control}
-                                id={"SVXSoftStopMin"}
-                                style={{ width: "45%", float: "left" }}
-                                value={softStopMin}
-                                onChange= {this.onUpdateText}
-                                onKeyDown= {this.onKeyText}
-                              />
-                            </Label>
-                            <Label title={"Soft Limit Max"}>
-                              <Input
-                                disabled={!has_limit_control}
-                                id={"SVXSoftStopMax"}
-                                style={{ width: "45%", float: "left" }}
-                                value={softStopMax}
-                                onChange= {this.onUpdateText}
-                                onKeyDown= {this.onKeyText}
-                              />
-                            </Label>
-
-                    </div>
 
 
                     <div hidden={(has_homing === false)}>
@@ -350,26 +378,43 @@ componentDidUpdate(prevProps, prevState, snapshot) {
   }
 
 
+  // Reverse Control lives with the device settings (relocated out of the live
+  // controls). It still publishes the same set_reverse_enable topic.
+  renderSettings() {
+    const { sendBoolMsg } = this.props.ros
+    const namespace = this.props.namespace ? this.props.namespace : 'None'
+    const status_msg = this.state.status_msg
+    if (status_msg == null){
+      return null
+    }
+    const reverseEnabled = status_msg.reverse_enabled
+
+    return (
+      <React.Fragment>
+        <Label title={"Reverse Control"}>
+          <Toggle checked={reverseEnabled} onClick={() => sendBoolMsg.bind(this)(namespace + "/set_reverse_enable",!reverseEnabled)} />
+        </Label>
+      </React.Fragment>
+    )
+  }
+
+
   renderDeviceIF() {
-    const { sendTriggerMsg, sendIntMsg } = this.props.ros
+    const { sendTriggerMsg } = this.props.ros
     const namespace = (this.props.namespace !== undefined) ? this.props.namespace : null
     const status_msg = this.state.status_msg
 
     const devices = this.props.ros.svxDevices
     var has_abs_pos = false
     var has_goto_control = false
-    var has_speed_control = false
     var has_stop_control = false
-    var has_spin_control = false
     var has_homing = false
     const devicesList = Object.keys(devices)
     if (devicesList.indexOf(namespace) !== -1){
       const capabilities = devices[namespace]
       has_abs_pos = capabilities && (capabilities.has_absolute_positioning === true)
       has_goto_control = capabilities && (capabilities.has_goto_control === true)
-      has_speed_control = capabilities && (capabilities.has_adjustable_speed === true)
       has_stop_control = capabilities && (capabilities.has_stop_control === true)
-      has_spin_control = capabilities && (capabilities.has_spin_control === true)
       has_homing = capabilities && (capabilities.has_homing === true)
     }
 
@@ -378,8 +423,17 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     const positionNowClean = position_now + .001
     const positionGoalClean = position_goal + .001
 
-    const speedRatio = status_msg.speed_ratio
+    // Position slider range = the declared hard-travel bounds (soft limits removed).
+    const softStopMin = status_msg.min_softstop_deg
+    const softStopMax = status_msg.max_softstop_deg
+
+    // Continuous-mode bipolar value from status (sign = direction, magnitude = speed).
     const spinDirection = status_msg.spin_direction
+    const speedRatio = status_msg.speed_ratio
+    const bipolarFromStatus = ((spinDirection >= 0) ? 1 : -1) * (speedRatio || 0) * 100
+    const bipolarVal = (this.state.bipolar != null) ? this.state.bipolar : bipolarFromStatus
+
+    const pwmAvail = this.pwmAvailable()
 
     return (
       <React.Fragment>
@@ -390,7 +444,28 @@ componentDidUpdate(prevProps, prevState, snapshot) {
           </ButtonMenu>
 
 
-          <div hidden={(has_goto_control === false && has_abs_pos === false)}>
+          <Label title={"Continuous Spinning"}>
+            <Toggle
+              checked={this.state.spinning_mode === true}
+              onClick={() => this.setState({ spinning_mode: !this.state.spinning_mode })}>
+            </Toggle>
+          </Label>
+
+
+          <div hidden={(this.state.spinning_mode === true) || (has_goto_control === false && has_abs_pos === false)}>
+
+              <SliderAdjustment
+                disabled={!has_goto_control}
+                title={"Position"}
+                msgType={"std_msgs/Float32"}
+                adjustment={position_goal}
+                topic={namespace + "/goto_position"}
+                scaled={1}
+                min={softStopMin}
+                max={softStopMax}
+                tooltip={"Commanded position in degrees"}
+                unit={"°"}
+              />
 
               <Label title={"GoTo Position (deg)"}>
                 <Input
@@ -403,11 +478,19 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                 />
               </Label>
 
+              <Label title={"Show PWM (µs)"}>
+                <Toggle
+                  disabled={!pwmAvail}
+                  checked={this.state.show_pwm === true && pwmAvail}
+                  onClick={() => this.setState({ show_pwm: !this.state.show_pwm })}>
+                </Toggle>
+              </Label>
+
               <Label title={"Current Position"}>
                 <Input
                   disabled
                   style={{ width: "45%", float: "left" }}
-                  value={round(positionNowClean, 2)}
+                  value={this.posDisplay(positionNowClean)}
                 />
               </Label>
 
@@ -415,48 +498,25 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                 <Input
                   disabled
                   style={{ width: "45%", float: "left" }}
-                  value={round(positionGoalClean, 2)}
+                  value={this.posDisplay(positionGoalClean)}
                 />
               </Label>
 
           </div>
 
 
-          <div hidden={(has_speed_control === false)}>
+          <div hidden={(this.state.spinning_mode === false)}>
 
-            <Label title={"Max Speed (dps)"}>
-                <Input
-                  id={"SVXMaxSpeed"}
-                  style={{ width: "45%" }}
-                  value={this.state.speedMax}
-                  onChange= {this.onUpdateText}
-                  onKeyDown= {this.onKeyText}
+            <Label title={"Speed / Direction"}>
+              <div style={{ width: "60%", float: "left" }}>
+                <Slider
+                  min={-100}
+                  max={100}
+                  value={bipolarVal}
+                  onChange={(v) => this.setState({ bipolar: v })}
+                  onAfterChange={(v) => { this.onBipolarChange(v); this.setState({ bipolar: null }) }}
                 />
-            </Label>
-
-            <SliderAdjustment
-              disabled={!has_speed_control}
-              title={"Speed"}
-              msgType={"std_msgs/Float32"}
-              adjustment={speedRatio}
-              topic={namespace + "/set_speed_ratio"}
-              scaled={0.01}
-              min={0}
-              max={100}
-              tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-              unit={"%"}
-            />
-
-          </div>
-
-
-          <div hidden={(has_spin_control === false)}>
-
-            <Label title={"Spin Direction"}>
-              <Toggle
-                checked={spinDirection >= 0}
-                onClick={() => sendIntMsg(namespace + "/set_spin_direction", (spinDirection >= 0) ? -1 : 1)}>
-              </Toggle>
+              </div>
             </Label>
 
           </div>
@@ -491,6 +551,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
               { (status_msg != null) ? this.renderDeviceIF() : null}
               { (status_msg != null && show_controls === true) ? this.renderControlPanel() : null}
+              { (status_msg != null && show_config === true) ? this.renderSettings() : null}
               { (status_msg != null && show_config === true) ?
                 <NepiIFConfig
                 namespace={namespace}
@@ -510,6 +571,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
               { (status_msg != null) ? this.renderDeviceIF() : null}
               { (status_msg != null && show_controls === true) ? this.renderControlPanel() : null}
+              { (status_msg != null && show_config === true) ? this.renderSettings() : null}
               { (status_msg != null && show_config === true) ?
                 <NepiIFConfig
                 namespace={namespace}
