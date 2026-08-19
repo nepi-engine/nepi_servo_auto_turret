@@ -18,8 +18,9 @@
 #
 
 # SVX (servo) device interface.
-# One SVX instance = one servo. Coordinating multiple servos (e.g. a pan/tilt
-# turret) is the application's job, not this interface's.
+# The generic single-servo interface: one SVX instance drives exactly one servo.
+# Coordinating multiple servos into a higher-level rig is the application's job,
+# not this interface's.
 # Open loop: position is reported as the last commanded value; nothing is measured.
 # The API speaks degrees. Conversion to servo pulse width is a driver concern.
 
@@ -55,6 +56,7 @@ class SVXActuatorIF:
     # Backup Factory Control Values
     FACTORY_CONTROLS_DICT = {
                 'reverse_enabled' : False,
+                'continuous_enabled' : False,
                 'speed_ratio' : 0.5,
                 'spin_direction' : 1
     }
@@ -96,15 +98,27 @@ class SVXActuatorIF:
     reverse_enabled = False
     ri = 1
 
+    # Continuous-rotation vs positional is a property of the servo that is plugged in,
+    # not of the board/driver -- the board just emits PWM either way. So the IF owns
+    # this as configuration (mirrors reverse_enabled: a param + a set_continuous_mode
+    # control topic), independent of whether any driver wired a spin callback. When
+    # enabled, has_spin is reported True and the UI switches to direction+speed.
+    continuous_enabled = False
+
     spin_direction = 1
+    # is_spinning reports True whenever the servo is in continuous mode and has not been
+    # stopped (STOP, or leaving continuous mode). It tracks that state, not the
+    # instantaneous speed, so it stays True at speed 0. Computed in publish_status from
+    # continuous_enabled and _spin_stopped.
     is_spinning = False
+    _spin_stopped = False
 
     speed_ratio = 0.5
     speed_max_dps = 10
 
 
     data_source_description = 'servo'
-    data_ref_description = 'servo_axis'
+    data_ref_description = 'servo'
 
 
     ### IF Initialization
@@ -114,7 +128,7 @@ class SVXActuatorIF:
                  factoryControls , # Dictionary to be supplied by parent, specific key set is required
                  factoryLimits = None,
                  data_source_description = 'servo',
-                 data_ref_description = 'servo_axis',
+                 data_ref_description = 'servo',
                  stopMovingCb = None, # Required; no args
                  gotoPositionCb = None, # None ==> No absolute positioning capability (position_deg)
                  getPositionCb = None, # Returns last sent position
@@ -224,10 +238,14 @@ class SVXActuatorIF:
             self.has_goto_control = True
 
         # SPIN DIRECTION  #############
+        # The spin callbacks are still accepted so a driver CAN act on direction, but
+        # has_spin is no longer derived from them -- continuous mode is IF-owned config
+        # (continuous_enabled, read from the param in initCb below). A positional-only
+        # board like the Maestro (setSpinDirection=None) can still be declared a
+        # continuous servo; the IF records/reports direction and drives speed via the
+        # speed callback the board does provide.
         self.setSpinDirection = setSpinDirection
         self.getSpinDirection = getSpinDirection
-        if self.setSpinDirection is not None:
-            self.has_spin = True
 
         # SPEED SETTINGS  #############
         self.setSpeedMaxCb = setSpeedMaxCb
@@ -330,6 +348,10 @@ class SVXActuatorIF:
                 'namespace': self.namespace,
                 'factory_val': self.factory_controls_dict['reverse_enabled']
             },
+            'continuous_enabled': {
+                'namespace': self.namespace,
+                'factory_val': self.factory_controls_dict['continuous_enabled']
+            },
             'spin_direction': {
                 'namespace': self.namespace,
                 'factory_val': self.factory_controls_dict['spin_direction']
@@ -391,14 +413,6 @@ class SVXActuatorIF:
                 'msg': Float32,
                 'qsize': 1,
                 'callback': self._gotoPositionCb,
-                'callback_args': ()
-            },
-            'goto_ratio': {
-                'namespace': self.namespace,
-                'topic': 'goto_ratio',
-                'msg': Float32,
-                'qsize': 1,
-                'callback': self._gotoRatioCb,
                 'callback_args': ()
             },
             'set_speed_ratio': {
@@ -471,6 +485,14 @@ class SVXActuatorIF:
                 'msg': Int32,
                 'qsize': 1,
                 'callback': self._setSpinDirectionCb,
+                'callback_args': ()
+            },
+            'set_continuous_mode': {
+                'namespace': self.namespace,
+                'topic': 'set_continuous_mode',
+                'msg': Bool,
+                'qsize': 1,
+                'callback': self._setContinuousModeCb,
                 'callback_args': ()
             }
         }
@@ -570,6 +592,11 @@ class SVXActuatorIF:
             self.reverse_enabled = self.node_if.get_param('reverse_enabled')
             self.ri = -1 if self.reverse_enabled else 1
 
+            continuous_enabled = self.node_if.get_param('continuous_enabled')
+            if continuous_enabled is not None:
+                self.continuous_enabled = continuous_enabled
+            self._applyContinuousMode()
+
             self.spin_direction = self.node_if.get_param('spin_direction')
             if self.spin_direction is not None and self.setSpinDirection is not None:
                 self.setSpinDirection(self.spin_direction)
@@ -631,10 +658,6 @@ class SVXActuatorIF:
             adj_max = max_deg
         return adj_min,adj_max
 
-    def getLimitsAdj(self,min_deg,max_deg):
-        [adj_min,adj_max] = self.getMinMaxAdj(min_deg,max_deg)
-        return adj_min,adj_max
-
     def getLimitsSoftstopAdj(self):
         [adj_min,adj_max] = self.getMinMaxAdj(self.min_softstop_deg,self.max_softstop_deg)
         return adj_min,adj_max
@@ -671,25 +694,6 @@ class SVXActuatorIF:
                 self.msg_if.pub_info("Connected", log_name_list = self.log_name_list)
         return self.ready
 
-
-
-    def degToRatio(self, deg):
-        span = (self.max_softstop_deg - self.min_softstop_deg)
-        if span == 0:
-            return 0.5
-        if self.reverse_enabled == False:
-            ratio = 1 - (deg - self.min_softstop_deg) / span
-        else:
-            ratio = (deg - self.min_softstop_deg) / span
-        return ratio
-
-    def ratioToDeg(self, ratio):
-        span = (self.max_softstop_deg - self.min_softstop_deg)
-        if self.reverse_enabled == False:
-            deg = self.min_softstop_deg + (1-ratio) * span
-        else:
-            deg = self.max_softstop_deg - (1-ratio) * span
-        return deg
 
 
     def positionWithinSoftLimits(self, deg):
@@ -742,6 +746,10 @@ class SVXActuatorIF:
             self.setSoftLimitsCb(min_deg, max_deg)
 
         self.msg_if.pub_info("Set hardstop range to " + str(min_deg) + " to " + str(max_deg))
+        # A live range change moves the auto (midpoint) center and rescales the spin
+        # endpoints, so re-issue an active spin against the new range.
+        if self.continuous_enabled == True and self.is_spinning == True:
+            self._commandSpin()
         self.publish_status()
         return True
 
@@ -752,7 +760,11 @@ class SVXActuatorIF:
 
     def stopServo(self):
         self.msg_if.pub_info("Stopping motion by request", log_name_list = self.log_name_list)
-        if self.stopMovingCb is not None:
+        if self.continuous_enabled == True:
+            # A continuous servo "stops" only at the center/stop pulse -- holding the
+            # current pulse (what stopMovingCb does) would keep it spinning.
+            self._stopSpin()
+        elif self.stopMovingCb is not None:
             self.stopMovingCb()
         elif self.gotoPositionCb is not None:
             stop_deg = self.status_msg.position_now_deg * self.ri
@@ -781,7 +793,12 @@ class SVXActuatorIF:
             self.setSpeedRatioCb(speed_ratio)
             if self.node_if is not None:
                 self.node_if.set_param('speed_ratio',speed_ratio)
-            self.publish_status()
+            # In continuous mode speed_ratio is the rotation speed: re-issue the spin so
+            # the new magnitude takes effect as a pulse offset from center.
+            if self.continuous_enabled == True:
+                self._commandSpin()
+            else:
+                self.publish_status()
 
 
     def _setHomePositionCb(self, msg):
@@ -803,6 +820,12 @@ class SVXActuatorIF:
         self.goHome()
 
     def goHome(self):
+        # One button, two labels: "GO HOME" (positional) and "STOP" (continuous) both land
+        # here and drive the servo to its single saved position (home_pos_deg). For a
+        # continuous servo that degree is the neutral pulse, so going there stops it --
+        # mark it stopped so is_spinning drops to False.
+        if self.continuous_enabled == True:
+            self._spin_stopped = True
         if self.gotoPositionCb is not None:
             self.position_goal_deg = self.home_pos_deg
             self.gotoPositionCb(self.position_goal_deg)
@@ -824,38 +847,118 @@ class SVXActuatorIF:
         self.publish_status()
 
 
-    def _gotoRatioCb(self, msg):
-        ratio = msg.data
-        if (ratio < 0.0 or ratio > 1.0):
-            self.msg_if.pub_warn("Invalid position ratio " + "%.2f" % ratio)
-            return
-        if self.gotoPositionCb is None:
-            return
-        self.position_goal_deg = self.ratioToDeg(ratio) # Function takes care of reverse conversion
-        self.position_goal_deg = self.getPositionConditioned(self.position_goal_deg)
-        self.gotoPositionCb(self.position_goal_deg)
-        self.publish_status()
-
-
     def _setReverseEnableCb(self, msg):
         self.reverse_enabled = msg.data
         self.ri = -1 if msg.data == True else 1
         if self.node_if is not None:
             self.node_if.set_param('reverse_enabled', self.reverse_enabled)
         self.msg_if.pub_info("Set servo control to reverse=" + str(self.reverse_enabled))
+        # Reverse inverts spin direction too: re-issue an active spin in the new frame.
+        if self.continuous_enabled == True and self.is_spinning == True:
+            self._commandSpin()
+        else:
+            self.publish_status()
+
+
+    def _applyContinuousMode(self):
+        # Reflect the IF-owned continuous_enabled flag into the reported capability.
+        # has_spin (status) and has_spin_control (capabilities) both track it, so the
+        # UI switches to direction+speed as soon as the mode is toggled -- no driver
+        # callback required.
+        self.has_spin = bool(self.continuous_enabled)
+        self.status_msg.has_spin = self.has_spin
+        self.caps_report.has_spin_control = self.has_spin
+
+    def _setContinuousModeCb(self, msg):
+        self.continuous_enabled = msg.data
+        self._applyContinuousMode()
+        if self.node_if is not None:
+            self.node_if.set_param('continuous_enabled', self.continuous_enabled)
+        if self.continuous_enabled == True:
+            # Entering continuous is not a stop: come up at the center/stop pulse (which
+            # kills any residual motion from the last positional pulse) but mark
+            # not-stopped so is_spinning reports True. The speed slider then commands the
+            # actual rotation.
+            self._spin_stopped = False
+            self._commandCenter()
+        else:
+            # Leaving continuous halts the servo at the center/stop pulse.
+            self._stopSpin()
+        self.msg_if.pub_info("Set servo continuous mode to " + str(self.continuous_enabled))
         self.publish_status()
 
 
-    def _setSpinDirectionCb(self, msg):
-        if self.setSpinDirection is None:
+    def _clampToHardstops(self, deg):
+        if deg < self.min_hardstop_deg:
+            return self.min_hardstop_deg
+        if deg > self.max_hardstop_deg:
+            return self.max_hardstop_deg
+        return deg
+
+    def _spinCenter(self):
+        # Stop/center for continuous mode == the servo's single saved position
+        # (home_pos_deg). "STOP" just goes here (go_home), and the spin offsets are
+        # measured from it. Clamped into the current range.
+        return self._clampToHardstops(self.home_pos_deg)
+
+    def _commandSpin(self):
+        # Continuous-mode actuation, IF-owned: a continuous-rotation servo reads its
+        # pulse-offset-from-center as speed+direction. We synthesize that offset in
+        # degrees and hand it to the SAME gotoPositionCb a positional move uses -- the
+        # driver just maps degrees->pulse and knows nothing about spin. speed_ratio
+        # scales the offset; the reverse-adjusted direction picks the endpoint. Degrees
+        # here are driver-frame, matching gotoPositionCb's contract (reverse is folded
+        # into dir_eff, not applied again).
+        if self.continuous_enabled == False or self.gotoPositionCb is None:
             return
+        center = self._spinCenter()
+        ratio = self.speed_ratio
+        dir_eff = self.spin_direction * self.ri
+        if ratio is None or ratio <= 0.0:
+            target = center
+        elif dir_eff >= 0:
+            target = center + ratio * (self.max_hardstop_deg - center)
+        else:
+            target = center - ratio * (center - self.min_hardstop_deg)
+        target = self._clampToHardstops(target)
+        # A spin command (any speed, including 0 = sit at center) is "not stopped" --
+        # only STOP or leaving continuous halts. is_spinning derives from that state.
+        self._spin_stopped = False
+        self.position_goal_deg = target
+        self.gotoPositionCb(target)
+        self.publish_status()
+
+    def _commandCenter(self):
+        # Drive the servo to the center/stop pulse (a continuous servo's neutral). Pure
+        # actuation -- callers own the _spin_stopped state.
+        if self.gotoPositionCb is not None:
+            center = self._spinCenter()
+            self.position_goal_deg = center
+            self.gotoPositionCb(center)
+
+    def _stopSpin(self):
+        # Halt a continuous servo: mark it stopped (is_spinning -> False) and command the
+        # center/stop pulse -- not the current pulse, which a continuous servo would read
+        # as "keep spinning".
+        self._spin_stopped = True
+        self._commandCenter()
+
+    def _setSpinDirectionCb(self, msg):
+        # Record/report direction regardless of whether the board wired a spin
+        # callback; only call the board's callback when it provides one. In continuous
+        # mode the IF actuates the spin itself via gotoPositionCb (see _commandSpin);
+        # speed magnitude comes from set_speed_ratio (the Maestro implements that).
         spin_direction = 1 if msg.data >= 0 else -1
         self.spin_direction = spin_direction
-        self.setSpinDirection(spin_direction)
+        if self.setSpinDirection is not None:
+            self.setSpinDirection(spin_direction)
         if self.node_if is not None:
             self.node_if.set_param('spin_direction', spin_direction)
         self.msg_if.pub_info("Set spin direction to " + str(spin_direction))
-        self.publish_status()
+        if self.continuous_enabled == True:
+            self._commandSpin()
+        else:
+            self.publish_status()
 
 
     def _setHomePositionHereCb(self, _):
@@ -953,10 +1056,14 @@ class SVXActuatorIF:
             self.status_msg.position_goal_ratio = 0.5
 
         self.status_msg.reverse_enabled = self.reverse_enabled
+        self.status_msg.has_spin = self.has_spin
 
         if self.getSpinDirection is not None:
             self.spin_direction = self.getSpinDirection()
         self.status_msg.spin_direction = self.spin_direction
+        # is_spinning: True whenever in continuous mode and not stopped (STOP / left
+        # continuous), independent of the instantaneous speed_ratio.
+        self.is_spinning = bool(self.continuous_enabled and not self._spin_stopped)
         self.status_msg.is_spinning = self.is_spinning
 
         if self.getSpeedRatioCb is not None:

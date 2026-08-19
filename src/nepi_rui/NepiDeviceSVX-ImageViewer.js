@@ -19,10 +19,10 @@
  */
 
 // SVX (servo) image viewer panel.
-// One SVX device = one servo, so there is a single position slider (goto_ratio)
-// drawn only when the device reports absolute positioning. All field/topic names
-// match the DeviceSVXStatus msg (Figure 3), SVXCapabilitiesQuery srv (Figure 4),
-// and the Figure 5 control topics.
+// One SVX device = one servo. This panel is just the image viewer plus a STOP
+// button (shown when the device reports stop control); the position/motion
+// controls live in NepiDeviceSVX-Controls.js. All field/topic names match the
+// DeviceSVXStatus msg, the SVXCapabilitiesQuery srv, and the control topics.
 
 import React, { Component } from "react"
 

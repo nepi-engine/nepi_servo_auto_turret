@@ -707,7 +707,6 @@ class ROSConnectionStore {
   @observable imageFilterDetection = null
   @observable imageFilterSequencer = null
   @observable imageFilterPTX = null
-  @observable imageFilterSVX = null
   @observable targLocalizerImgTopic = null
   
   @observable lastUpdate = new Date()
@@ -3754,29 +3753,9 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSVXGoHome(svxNamespace) {
-    this.publishMessage({
-      name: svxNamespace + "/go_home",
-      messageType: "std_msgs/Empty",
-      data: {},
-      noPrefix: true
-    })    
-  }
-
-  @action.bound
   onPTXSetHomeHere(ptxNamespace) {
     this.publishMessage({
       name: ptxNamespace + "/set_home_position_here",
-      messageType: "std_msgs/Empty",
-      data: {},
-      noPrefix: true
-    })    
-  }  
-
-  @action.bound
-  onSVXSetHomeHere(svxNamespace) {
-    this.publishMessage({
-      name: svxNamespace + "/set_home_position_here",
       messageType: "std_msgs/Empty",
       data: {},
       noPrefix: true
@@ -3795,16 +3774,6 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSVXStop(svxNamespace) {
-    this.publishMessage({
-      name: svxNamespace + "/stop_moving",
-      messageType: "std_msgs/Empty",
-      data: {},
-      noPrefix: true
-    }) 
-  }
-
-  @action.bound
   onPTXPanStop(ptxNamespace) {
     this.publishMessage({
       name: ptxNamespace + "/stop_pan",
@@ -3815,29 +3784,9 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSVXPanStop(svxNamespace) {
-    this.publishMessage({
-      name: svxNamespace + "/stop_pan",
-      messageType: "std_msgs/Empty",
-      data: {},
-      noPrefix: true
-    }) 
-  }
-
-  @action.bound
   onPTXTiltStop(ptxNamespace) {
     this.publishMessage({
       name: ptxNamespace + "/stop_tilt",
-      messageType: "std_msgs/Empty",
-      data: {},
-      noPrefix: true
-    }) 
-  }
-
-  @action.bound
-  onSVXTiltStop(svxNamespace) {
-    this.publishMessage({
-      name: svxNamespace + "/stop_tilt",
       messageType: "std_msgs/Empty",
       data: {},
       noPrefix: true
@@ -3857,16 +3806,6 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSetSVXHomePos(svxNamespace, panHomePos, tiltHomePos) {
-    this.publishMessage({
-      name: svxNamespace + "/set_home_position",
-      messageType: "nepi_interfaces/ServoPosition",
-      data: {"pan_deg": panHomePos, "tilt_deg": tiltHomePos},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onSetPTXGotoPos(ptxNamespace, panPos, tiltPos) {
     this.publishMessage({
       name: ptxNamespace + "/goto_position",
@@ -3877,29 +3816,9 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSetSVXGotoPos(svxNamespace, panPos, tiltPos) {
-    this.publishMessage({
-      name: svxNamespace + "/goto_position",
-      messageType: "nepi_interfaces/ServoPosition",
-      data: {"pan_deg": panPos, "tilt_deg": tiltPos},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onSetPTXGotoPanPos(ptxNamespace, panPos) {
     this.publishMessage({
       name: ptxNamespace + "/goto_pan_position",
-      messageType: "std_msgs/Float32",
-      data: {"data": panPos},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
-  onSetSVXGotoPanPos(svxNamespace, panPos) {
-    this.publishMessage({
-      name: svxNamespace + "/goto_pan_position",
       messageType: "std_msgs/Float32",
       data: {"data": panPos},
       noPrefix: true
@@ -3917,33 +3836,10 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSetSVXGotoTiltPos(svxNamespace, tiltPos) {
-    this.publishMessage({
-      name: svxNamespace + "/goto_tilt_position",
-      messageType: "std_msgs/Float32",
-      data: {"data": tiltPos},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onSetPTXSoftStopPos(ptxNamespace, panMin, panMax, tiltMin, tiltMax) {
     this.publishMessage({
       name: ptxNamespace + "/set_soft_limits",
       messageType: "nepi_interfaces/PanTiltLimits",
-      data: {"min_pan_deg": panMin,
-             "max_pan_deg": panMax,
-             "min_tilt_deg": tiltMin,
-             "max_tilt_deg": tiltMax},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
-  onSetSVXSoftStopPos(svxNamespace, panMin, panMax, tiltMin, tiltMax) {
-    this.publishMessage({
-      name: svxNamespace + "/set_soft_limits",
-      messageType: "nepi_interfaces/ServoLimits",
       data: {"min_pan_deg": panMin,
              "max_pan_deg": panMax,
              "min_tilt_deg": tiltMin,
@@ -3966,19 +3862,6 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSetSVXHardStopPos(svxNamespace, panMin, panMax, tiltMin, tiltMax) {
-    this.publishMessage({
-      name: svxNamespace + "/set_hard_limits",
-      messageType: "nepi_interfaces/ServoLimits",
-      data: {"min_pan_deg": panMin,
-             "max_pan_deg": panMax,
-             "min_tilt_deg": tiltMin,
-             "max_tilt_deg": tiltMax},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onPTXJogPan(ptxNamespace, direction) {
     this.publishMessage({
       name: ptxNamespace + "/jog_timed_pan",
@@ -3990,31 +3873,9 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSVXJogPan(svxNamespace, direction) {
-    this.publishMessage({
-      name: svxNamespace + "/jog_timed_pan",
-      messageType: "nepi_interfaces/SingleAxisTimedMove",
-      data: {"direction": direction,
-             "duration_s": -1},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onPTXJogTilt(ptxNamespace, direction) {
     this.publishMessage({
       name: ptxNamespace + "/jog_timed_tilt",
-      messageType: "nepi_interfaces/SingleAxisTimedMove",
-      data: {"direction": direction,
-             "duration_s": -1},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
-  onSVXJogTilt(svxNamespace, direction) {
-    this.publishMessage({
-      name: svxNamespace + "/jog_timed_tilt",
       messageType: "nepi_interfaces/SingleAxisTimedMove",
       data: {"direction": direction,
              "duration_s": -1},
@@ -4035,33 +3896,9 @@ updateSetting(namespace,nameStr,typeStr,valueStr) {
   }
 
   @action.bound
-  onSVXJogSpeedPan(svxNamespace, direction, speed_ratio) {
-    this.publishMessage({
-      name: svxNamespace + "/jog_timed_pan_speed_ratio",
-      messageType: "nepi_interfaces/SingleAxisTimedSpeedMove",
-      data: {"direction": direction,
-             "speed_ratio": speed_ratio,
-             "duration_s": -1},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
   onPTXJogSpeedTilt(ptxNamespace, direction, speed_ratio) {
     this.publishMessage({
       name: ptxNamespace + "/jog_timed_tilt_speed_ratio",
-      messageType: "nepi_interfaces/SingleAxisTimedSpeedMove",
-      data: {"direction": direction,
-             "speed_ratio": speed_ratio,
-             "duration_s": -1},
-      noPrefix: true
-    })
-  }
-
-  @action.bound
-  onSVXJogSpeedTilt(svxNamespace, direction, speed_ratio) {
-    this.publishMessage({
-      name: svxNamespace + "/jog_timed_tilt_speed_ratio",
       messageType: "nepi_interfaces/SingleAxisTimedSpeedMove",
       data: {"direction": direction,
              "speed_ratio": speed_ratio,

@@ -30,7 +30,6 @@ so its files drop into the `nepi_engine_ws` submodules (`nepi_interfaces`, `nepi
 | | `src/nepi_rui/NepiDeviceSVX-Controls.js` | Control panel (drawn per capability flags) |
 | | `src/nepi_rui/NepiDeviceSVX-ImageViewer.js` | Image viewer + position slider |
 | Driver | `src/nepi_drivers/svx_drivers/svx_servo_maestro_*` | Pololu Micro Maestro single-servo driver (USB serial) |
-| | `src/nepi_drivers/svx_drivers/svx_servo_generic_*` | Board-agnostic single-servo driver **stub** (kept for future boards) |
 
 ## Control topics (subscribed by `SVXActuatorIF`)
 
@@ -57,7 +56,7 @@ is a no-op.
 ## Hardware driver status
 
 The servo-controller board is the **Pololu Micro Maestro 6-Channel USB Servo Controller**.
-Two SVX drivers ship:
+One SVX driver ships:
 
 - `svx_drivers/svx_servo_maestro_*` — the **working** driver for the Maestro. It talks to
   the board's USB Command Port over serial (pyserial), converts degrees to servo pulse
@@ -70,9 +69,9 @@ Two SVX drivers ship:
   with an advisory `fcntl.flock`, so a pan/tilt turret (two servos on one Maestro) runs as
   two coexisting nodes.
 
-- `svx_drivers/svx_servo_generic_*` — retained board-agnostic **stub** (no hardware I/O).
-  Kept as the starting point for a future board (e.g. a custom-firmware ESP32); implement
-  the `TODO(board)` callbacks there when that board is chosen.
+To add a future board, write a new driver against the shared `SVXActuatorIF`
+(`src/nepi_api/device_if_svx.py`) — the generic single-servo interface — wiring only the
+capability callbacks that board supports (leave the rest `None`).
 
 The Maestro driver is written against the documented protocol but has **not been
 hardware-validated** in this environment (no Maestro attached) — see the validation note in
