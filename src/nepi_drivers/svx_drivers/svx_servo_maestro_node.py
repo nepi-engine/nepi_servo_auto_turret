@@ -207,7 +207,6 @@ class SvxServoMaestroNode:
     home_pos_deg = 0.0
     speed_ratio = 0.5
     speed_max_dps = 20.0
-    spin_direction = 1
 
     connected = False
 
@@ -294,8 +293,7 @@ class SvxServoMaestroNode:
         #Factory Control Values
         self.FACTORY_CONTROLS = {
             'reverse_enabled' : False,
-            'speed_ratio' : 0.5,
-            'spin_direction' : 1
+            'speed_ratio' : 0.5
         }
 
         # Push the initial acceleration + speed to the board before we come up.
@@ -306,8 +304,9 @@ class SvxServoMaestroNode:
         # Launch the SVX interface -- it subscribes/advertises all the servo
         # control topics, publishes status, and serves capabilities. We pass the
         # Figure 1 callbacks; the interface derives each has_* capability flag
-        # from which callbacks are non-None. A positional (non-continuous) servo
-        # has no spin, so the spin callbacks are None and has_spin reports False.
+        # from which callbacks are non-None. Spin/continuous mode is owned entirely
+        # by the IF (continuous_enabled param + set_continuous_mode topic); the
+        # driver declares nothing about it.
         self.msg_if.pub_info("Launching NEPI SVX interface...")
         self.svx_if = SVXActuatorIF(device_info = self.device_info_dict,
                                     capSettings = self.cap_settings,
@@ -321,8 +320,6 @@ class SvxServoMaestroNode:
                                     getPositionCb = self.getPosition,
                                     setSoftLimitsCb = self.setSoftLimits,
                                     getSoftLimitsCb = self.getSoftLimits,
-                                    setSpinDirection = None,
-                                    getSpinDirection = None,
                                     setSpeedRatioCb = self.setSpeedRatio,
                                     getSpeedRatioCb = self.getSpeedRatio,
                                     setSpeedMaxCb = self.setSpeedMax,
@@ -333,6 +330,13 @@ class SvxServoMaestroNode:
                                     deviceResetCb = self.resetDevice
                                     )
         self.msg_if.pub_info(" ... SVX interface running")
+
+        # Persisted min_deg/max_deg may have been applied by SettingsIF while svx_if was
+        # still None (mid-construction), so setDegRange could not push them to the IF and
+        # the IF kept the factory range. Re-push the current calibrated range now that the
+        # IF exists, so its clamp range (and the reported travel) matches the settings.
+        self.svx_if.setHardstopLimits(self.limits_dict['min_hardstop_deg'],
+                                      self.limits_dict['max_hardstop_deg'])
 
         # Poll the Maestro for the pulse width it is currently transmitting so
         # the reported position tracks a speed/accel-limited slew.

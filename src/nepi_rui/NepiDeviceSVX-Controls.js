@@ -19,10 +19,10 @@
  */
 
 // SVX (servo) controls panel.
-// One SVX device = one servo. Controls are drawn conditionally on the capability
-// flags reported by the device (SVXCapabilitiesQuery). A servo is EITHER positional
-// (has_absolute_positioning) OR continuous-rotation (has_spin_control); the bottom
-// slider adapts to whichever the device reports. Soft limits were removed -- the
+// One SVX device = one servo. Positional vs continuous-rotation is IF-owned config,
+// not a board capability: the Continuous-Spinning toggle publishes set_continuous_mode
+// and the IF flips status_msg.has_spin, so the bottom slider switches between a degree
+// position slider and a bipolar direction+speed slider. Soft limits were removed -- the
 // hardstops are the single clamp range -- so there are no soft-limit inputs here.
 
 import React, { Component } from "react"
@@ -57,20 +57,23 @@ class NepiDeviceSVXControls extends Component {
 
       show_controls: false,
 
-      // Continuous-spinning mode toggle (UI-local). When on, the controls switch
-      // from degree position to direction+speed; the bipolar slider publishes to the
-      // existing set_spin_direction / set_speed_ratio topics.
-      spinning_mode: false,
-
       homePos : null,
       gotoPos : null,
+      // Positional-mode max speed input (deg/sec), publishes set_speed_max_dps.
+      speedMax : null,
+      // Continuous-mode numeric speed box, -100..100 (mirrors the bipolar slider).
+      spinInput : null,
 
       // Position readout unit toggle: false = degrees, true = PWM microseconds.
       show_pwm : false,
-      // pulse_min_us / pulse_max_us read from the device's own settings (node-owned).
-      // Null until the settings arrive; the PWM toggle stays disabled while null.
+      // pulse_min_us / pulse_max_us AND min_deg / max_deg read from the device's own
+      // settings (node-owned). Null until the settings arrive; the PWM toggle stays
+      // disabled while pulse values are null, and the position slider bounds come from
+      // degMin / degMax (the servo's calibrated travel).
       pulseMin : null,
       pulseMax : null,
+      degMin : null,
+      degMax : null,
 
       // Local handle position for the continuous-mode bipolar slider while dragging.
       bipolar : null,
@@ -94,6 +97,7 @@ class NepiDeviceSVXControls extends Component {
     this.updateSettingsListener = this.updateSettingsListener.bind(this)
     this.settingsListener = this.settingsListener.bind(this)
 
+    this.degRange = this.degRange.bind(this)
     this.degToPwm = this.degToPwm.bind(this)
     this.pwmAvailable = this.pwmAvailable.bind(this)
     this.posDisplay = this.posDisplay.bind(this)
@@ -116,6 +120,7 @@ class NepiDeviceSVXControls extends Component {
     }
 
     const homePos = message.home_pos_deg
+    const speedMax = message.speed_max_dps
 
     var needs_update = false
     if (last_status_msg == null){
@@ -123,12 +128,14 @@ class NepiDeviceSVXControls extends Component {
     }
     else {
        needs_update = (
-          homePos !== last_status_msg.home_pos_deg
+          homePos !== last_status_msg.home_pos_deg ||
+          speedMax !== last_status_msg.speed_max_dps
       )
     }
     if (needs_update === true){
       this.setState({
-          homePos : round(message.home_pos_deg, 1)
+          homePos : round(message.home_pos_deg, 1),
+          speedMax : round(message.speed_max_dps, 1)
       })
     }
 
@@ -180,14 +187,31 @@ class NepiDeviceSVXControls extends Component {
     const list = (message && message.settings_list) ? message.settings_list : []
     var pmin = null
     var pmax = null
+    var dmin = null
+    var dmax = null
     for (let i = 0; i < list.length; i++) {
       const s = list[i]
       if (s.name_str === "pulse_min_us") { pmin = Number(s.value_str) }
       else if (s.name_str === "pulse_max_us") { pmax = Number(s.value_str) }
+      else if (s.name_str === "min_deg") { dmin = Number(s.value_str) }
+      else if (s.name_str === "max_deg") { dmax = Number(s.value_str) }
     }
-    if (pmin !== this.state.pulseMin || pmax !== this.state.pulseMax) {
-      this.setState({ pulseMin: pmin, pulseMax: pmax })
+    if (pmin !== this.state.pulseMin || pmax !== this.state.pulseMax ||
+        dmin !== this.state.degMin || dmax !== this.state.degMax) {
+      this.setState({ pulseMin: pmin, pulseMax: pmax, degMin: dmin, degMax: dmax })
     }
+  }
+
+  // Position slider bounds come straight from the servo's own min_deg / max_deg
+  // settings (the calibrated travel), falling back to the status-reported range only
+  // until the settings arrive.
+  degRange() {
+    const status = this.state.status_msg
+    const dmin = this.state.degMin
+    const dmax = this.state.degMax
+    const lo = (dmin != null && !isNaN(dmin)) ? dmin : (status ? status.min_softstop_deg : 0)
+    const hi = (dmax != null && !isNaN(dmax)) ? dmax : (status ? status.max_softstop_deg : 0)
+    return [lo, hi]
   }
 
 // Lifecycle method called when component updates.
@@ -227,8 +251,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     if (status == null || pmin == null || pmax == null || isNaN(pmin) || isNaN(pmax)) {
       return null
     }
-    const dmin = status.min_softstop_deg
-    const dmax = status.max_softstop_deg
+    const [dmin, dmax] = this.degRange()
     const span = dmax - dmin
     if (span === 0) { return pmin }
     const t = (deg - dmin) / span
@@ -262,6 +285,18 @@ componentDidUpdate(prevProps, prevState, snapshot) {
       setElementStyleModified(el)
       this.setState({gotoPos: e.target.value})
     }
+    else if (e.target.id === "SVXMaxSpeed")
+    {
+      const el = document.getElementById("SVXMaxSpeed")
+      setElementStyleModified(el)
+      this.setState({speedMax: e.target.value})
+    }
+    else if (e.target.id === "SVXSpin")
+    {
+      const el = document.getElementById("SVXSpin")
+      setElementStyleModified(el)
+      this.setState({spinInput: e.target.value})
+    }
   }
 
   onKeyText(e) {
@@ -282,6 +317,23 @@ componentDidUpdate(prevProps, prevState, snapshot) {
         clearElementStyleModified(el)
         sendFloatMsg(namespace + "/goto_position", el.value)
         this.setState({gotoPos: null})
+      }
+      else if (e.target.id === "SVXMaxSpeed")
+      {
+        const el = document.getElementById("SVXMaxSpeed")
+        clearElementStyleModified(el)
+        sendFloatMsg(namespace + "/set_speed_max_dps", el.value)
+      }
+      else if (e.target.id === "SVXSpin")
+      {
+        const el = document.getElementById("SVXSpin")
+        clearElementStyleModified(el)
+        // Same decomposition as the bipolar slider: sign = direction, magnitude = speed.
+        var v = Number(el.value)
+        if (isNaN(v)) { v = 0 }
+        v = Math.max(-100, Math.min(100, v))
+        this.onBipolarChange(v)
+        this.setState({ bipolar: v, spinInput: null })
       }
     }
   }
@@ -316,6 +368,8 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     }
 
     const homePos = this.state.homePos
+    // Same saved slot, mode-aware label: "Stop" for a continuous servo, "Home" otherwise.
+    const spinning = (status_msg != null && status_msg.has_spin === true)
 
     const show_controls =  this.state.show_controls
 
@@ -346,7 +400,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
                     <div hidden={(has_homing === false)}>
 
-                    <Label title={"Home Position"}>
+                    <Label title={spinning ? "Stop Position (deg)" : "Home Position (deg)"}>
                       <Input
                         disabled={!has_homing}
                         id={"SVXHomePos"}
@@ -358,7 +412,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                     </Label>
 
                     <ButtonMenu>
-                      <Button disabled={!has_set_home} onClick={() => sendTriggerMsg(namespace + "/set_home_position_here")}>{"Set Home Here"}</Button>
+                      <Button disabled={!has_set_home} onClick={() => sendTriggerMsg(namespace + "/set_home_position_here")}>{spinning ? "Set Stop Here" : "Set Home Here"}</Button>
                     </ButtonMenu>
 
                   </div>
@@ -400,37 +454,48 @@ componentDidUpdate(prevProps, prevState, snapshot) {
 
 
   renderDeviceIF() {
-    const { sendTriggerMsg } = this.props.ros
+    const { sendTriggerMsg, sendBoolMsg } = this.props.ros
     const namespace = (this.props.namespace !== undefined) ? this.props.namespace : null
     const status_msg = this.state.status_msg
 
     const devices = this.props.ros.svxDevices
     var has_abs_pos = false
     var has_goto_control = false
-    var has_stop_control = false
     var has_homing = false
+    var has_speed_control = false
     const devicesList = Object.keys(devices)
     if (devicesList.indexOf(namespace) !== -1){
       const capabilities = devices[namespace]
       has_abs_pos = capabilities && (capabilities.has_absolute_positioning === true)
       has_goto_control = capabilities && (capabilities.has_goto_control === true)
-      has_stop_control = capabilities && (capabilities.has_stop_control === true)
       has_homing = capabilities && (capabilities.has_homing === true)
+      has_speed_control = capabilities && (capabilities.has_adjustable_speed === true)
     }
+
+    // Continuous vs positional is IF-owned configuration (status_msg.has_spin), not a
+    // driver capability. The Continuous-Spinning toggle declares which kind of servo is
+    // plugged in and publishes set_continuous_mode; the IF flips has_spin and the
+    // controls switch to direction+speed. Driven off live status so it round-trips.
+    const spinning = (status_msg.has_spin === true)
 
     const position_now = status_msg.position_now_deg
     const position_goal = status_msg.position_goal_deg
     const positionNowClean = position_now + .001
     const positionGoalClean = position_goal + .001
 
-    // Position slider range = the declared hard-travel bounds (soft limits removed).
-    const softStopMin = status_msg.min_softstop_deg
-    const softStopMax = status_msg.max_softstop_deg
+    // Position slider range = the servo's calibrated travel, read from its own
+    // min_deg / max_deg settings (falls back to the status range until they arrive).
+    const [rangeMin, rangeMax] = this.degRange()
 
-    // Continuous-mode bipolar value from status (sign = direction, magnitude = speed).
+    // Continuous-mode bipolar value (sign = direction, magnitude = speed). Rest at
+    // center (0) unless the servo is actually spinning; only then reflect the
+    // reported direction/speed. Once the user drags, the handle holds the committed
+    // value (this.state.bipolar) rather than snapping back before the status echo.
     const spinDirection = status_msg.spin_direction
     const speedRatio = status_msg.speed_ratio
-    const bipolarFromStatus = ((spinDirection >= 0) ? 1 : -1) * (speedRatio || 0) * 100
+    const bipolarFromStatus = (status_msg.is_spinning === true)
+      ? (((spinDirection >= 0) ? 1 : -1) * (speedRatio || 0) * 100)
+      : 0
     const bipolarVal = (this.state.bipolar != null) ? this.state.bipolar : bipolarFromStatus
 
     const pwmAvail = this.pwmAvailable()
@@ -438,21 +503,23 @@ componentDidUpdate(prevProps, prevState, snapshot) {
     return (
       <React.Fragment>
 
+          {/* One button, repurposed by servo type: "STOP" when continuous, "GO HOME"
+              when positional. Both just drive the servo to its single saved position
+              (go_home); for a continuous servo that neutral degree stops it. */}
           <ButtonMenu>
-            <Button disabled={!has_stop_control} onClick={() => sendTriggerMsg(namespace + "/stop_moving")}>{"STOP"}</Button>
-            <Button disabled={!has_homing} onClick={() => sendTriggerMsg(namespace + "/go_home")}>{"GO HOME"}</Button>
+            <Button disabled={!has_homing} onClick={() => sendTriggerMsg(namespace + "/go_home")}>{spinning ? "STOP" : "GO HOME"}</Button>
           </ButtonMenu>
 
 
           <Label title={"Continuous Spinning"}>
             <Toggle
-              checked={this.state.spinning_mode === true}
-              onClick={() => this.setState({ spinning_mode: !this.state.spinning_mode })}>
+              checked={spinning}
+              onClick={() => sendBoolMsg.bind(this)(namespace + "/set_continuous_mode", !spinning)}>
             </Toggle>
           </Label>
 
 
-          <div hidden={(this.state.spinning_mode === true) || (has_goto_control === false && has_abs_pos === false)}>
+          <div hidden={(spinning === true) || (has_goto_control === false && has_abs_pos === false)}>
 
               <SliderAdjustment
                 disabled={!has_goto_control}
@@ -461,10 +528,34 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                 adjustment={position_goal}
                 topic={namespace + "/goto_position"}
                 scaled={1}
-                min={softStopMin}
-                max={softStopMax}
+                min={rangeMin}
+                max={rangeMax}
                 tooltip={"Commanded position in degrees"}
                 unit={"°"}
+              />
+
+              <Label title={"Max Speed (dps)"}>
+                <Input
+                  disabled={!has_speed_control}
+                  id={"SVXMaxSpeed"}
+                  style={{ width: "45%", float: "left" }}
+                  value={this.state.speedMax}
+                  onChange= {this.onUpdateText}
+                  onKeyDown= {this.onKeyText}
+                />
+              </Label>
+
+              <SliderAdjustment
+                disabled={!has_speed_control}
+                title={"Speed"}
+                msgType={"std_msgs/Float32"}
+                adjustment={speedRatio}
+                topic={namespace + "/set_speed_ratio"}
+                scaled={0.01}
+                min={0}
+                max={100}
+                tooltip={"Speed as a percentage (0%=min, 100%=max)"}
+                unit={"%"}
               />
 
               <Label title={"GoTo Position (deg)"}>
@@ -505,7 +596,7 @@ componentDidUpdate(prevProps, prevState, snapshot) {
           </div>
 
 
-          <div hidden={(this.state.spinning_mode === false)}>
+          <div hidden={(spinning === false)}>
 
             <Label title={"Speed / Direction"}>
               <div style={{ width: "60%", float: "left" }}>
@@ -514,9 +605,35 @@ componentDidUpdate(prevProps, prevState, snapshot) {
                   max={100}
                   value={bipolarVal}
                   onChange={(v) => this.setState({ bipolar: v })}
-                  onAfterChange={(v) => { this.onBipolarChange(v); this.setState({ bipolar: null }) }}
+                  onAfterChange={(v) => { this.onBipolarChange(v); this.setState({ bipolar: v }) }}
                 />
               </div>
+            </Label>
+
+            <Label title={"Speed / Direction (-100..100)"}>
+              <Input
+                id={"SVXSpin"}
+                style={{ width: "45%", float: "left" }}
+                value={this.state.spinInput}
+                onChange= {this.onUpdateText}
+                onKeyDown= {this.onKeyText}
+              />
+            </Label>
+
+            <Label title={"Show PWM (µs)"}>
+              <Toggle
+                disabled={!pwmAvail}
+                checked={this.state.show_pwm === true && pwmAvail}
+                onClick={() => this.setState({ show_pwm: !this.state.show_pwm })}>
+              </Toggle>
+            </Label>
+
+            <Label title={"Current Position"}>
+              <Input
+                disabled
+                style={{ width: "45%", float: "left" }}
+                value={this.posDisplay(positionNowClean)}
+              />
             </Label>
 
           </div>
