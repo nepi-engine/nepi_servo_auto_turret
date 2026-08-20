@@ -38,6 +38,9 @@ class ServosPanTiltDiscovery:
 
   active_devices_dict = dict()
   node_launch_name = "servos_pan_tilt"
+  node_launched = False
+  node_process = None
+  node_name = "servos_pan_tilt"
 
   dont_retry_list = []
 
@@ -74,127 +77,38 @@ class ServosPanTiltDiscovery:
 
     ###################################
 
-    # Retry behavior
-    self.retry = retry_enabled
-    if self.retry == True:
-        self.dont_retry_list = []
-
-    ### Purge Unresponsive Connections
-    path_purge_list = []
-    for path_str in self.active_devices_dict.keys():
-        success = self.checkOnDevice(path_str)
-        if success == False:
-          path_purge_list.append(path_str) 
-    # Clean up the active_devices_dict
-    for path_str in path_purge_list:
-      del  self.active_devices_dict[path_str]
-      if path_str in self.active_paths_list:
-        self.active_paths_list.remove(path_str)
-
-    ### Checking for devices on available paths
-    for path_str in self.available_paths_list:
-      if path_str not in self.active_paths_list and path_str not in self.excludedDevices:
-        found_device = self.checkForDevice(path_str)
-        if found_device == True and path_str not in self.dont_retry_list:
-          self.logger.log_info("Found device on path: " + path_str)
-          success = self.launchDeviceNode(path_str)
-          if success == True:
-            self.active_paths_list.append(path_str)
-            self.active_paths_list.append(self.source_path)
+    if self.node_launched == False:
+      success = self.launchDeviceNode()
     return self.active_paths_list
   ################################################
 
-  ##########  Device specific calls
+  
 
-  def checkForDevice(self,path_str):
-    for included_device in self.includeDevices:
-      found_device = path_str.find(included_device) != -1 
-      if found_device:
-        return True
-    return False
-
-
-  def checkOnDevice(self,path_str):
-    active = True
-    if path_str not in self.available_paths_list:
-      active = False
-    elif self.checkForDevice(path_str) == False:
-      active = False
-    if active == False:
-      self.logger.log_info("No longer detecting device on : " + path_str)
-      if path_str in self.active_devices_dict.keys():
-        path_entry = self.active_devices_dict[path_str]
-        node_name = path_entry['node_name']
-        sub_process = path_entry['sub_process']
-        self.dont_retry_list.append(path_str)
-        success = nepi_drvs.killDriverNode(node_name,sub_process)
-
-        # Remove from dont_retry_list
-        launch_id = path_str
-        if launch_id in self.dont_retry_list:
-          self.dont_retry_list.remove(launch_id)
-
-    return active
-
-
-  def launchDeviceNode(self, path_str):
+  def launchDeviceNode(self):
     success = False
-    launch_id = path_str
-
+    
     node_launch_name = 'servos_pan_tilt_'
-    self.logger.log_warn("Entering launch device function for path: " + str(path_str) )###
+    self.logger.log_warn("Entering launch device function")###
     file_name = self.drv_dict['NODE_DICT']['file_name']
     device_name = self.node_launch_name
     node_name = nepi_system.get_device_alias(device_name)
     self.logger.log_warn(" launching node: " + node_name)
 
 
-
-    #Setup required param server drv_dict for discovery node
-    dict_param_name = nepi_sdk.create_namespace(self.base_namespace,node_name + "/drv_dict")
-    self.drv_dict['DEVICE_DICT']={'device_name': device_name}
-    self.source_path = '/dev/' + os.readlink(path_str)
-    self.drv_dict['DEVICE_DICT']['device_path'] = self.source_path
-    self.drv_dict['DEVICE_DICT']['baud_str'] = self.baud_str
-    self.drv_dict['DEVICE_DICT']['addr_str'] = self.addr_str
-    nepi_sdk.set_param(dict_param_name,self.drv_dict)
-
     [success, msg, sub_process] = nepi_drvs.launchDriverNode(file_name, node_name)
-
-    # Process luanch results
-    self.launch_time_dict[launch_id] = nepi_sdk.get_time()
-    if success:
-      self.logger.log_info("Launched node: " + node_name)
-      self.active_devices_dict[path_str] = {'node_name': node_name, 'sub_process': sub_process}
+    if success == True:
+      self.node_name = node_name
+      self.node_process = sub_process
+      self.node_launched = True
     else:
-      self.logger.log_info("Failed to lauch node: " + node_name + " with msg: " + msg)
-      if self.retry == False:
-        self.logger.log_info("Will not try relaunch for node: " + node_name)
-        self.dont_retry_list.append(path_str)
+      self.logger.log_warn("Node Launch Failed " + str(msg))###
     return success
 
   def killAllDevices(self,active_paths_list):
-    #self.logger.log_warn("Entering Kill All Devices function for path: " + str(path_str))###
-    path_purge_list = []
-    for key in self.active_devices_dict.keys():
-      path_purge_list.append(key)
-    #self.logger.log_warn("Killing Devices: " + str(path_purge_list))
-    for path_str in path_purge_list:
-        path_entry = self.active_devices_dict[path_str]
-        node_name = path_entry['node_name']
-        sub_process = path_entry['sub_process']
-        if self.retry == False:
-          self.logger.log_warn("Will not try relaunch for node: " + node_name)
-          self.dont_retry_list.append(path_str)        
-        success = nepi_drvs.killDriverNode(node_name,sub_process)
-        if path_str in active_paths_list:
-          active_paths_list.remove(path_str)
-        if self.source_path in active_paths_list:
-          active_paths_list.remove(self.source_path)
-        self.source_path = 'None'
-    for path_str in path_purge_list:
-        del  self.active_devices_dict[path_str]
-    nepi_sdk.sleep(1)
+    if self.node_process is not None and self.node_name is not None:
+        success = nepi_drvs.killDriverNode(self.node_name,self.node_process)
+        self.node_name = None
+        self.node_process = None
     return active_paths_list
 
 
