@@ -46,11 +46,14 @@ class ServosPTXNode:
     CAP_SETTINGS = dict(
       pan_servo = {"type":"Discrete","name":"pan_servo","options":["None"]},
       pan_connected = {"type":"Bool","name":"pan_connected","disabled":True},
-      tilt_servo = {"type":"Discrete","name":"pan_servo","options":["None"]},
+      tilt_servo = {"type":"Discrete","name":"tilt_servo","options":["None"]},
       tilt_connected = {"type":"Bool","name":"tilt_connected","disabled":True},
     )
-    cap_settings = CAP_SETTINGS
-    
+    # cap_settings is a per-instance deep copy made in __init__. Binding it to
+    # CAP_SETTINGS here would alias the two names to one dict, so every options
+    # update would mutate the factory table it is supposed to be derived from.
+    cap_settings = None
+
 
     pan_connect_if = None
     pan_options = ['None']
@@ -120,8 +123,18 @@ class ServosPTXNode:
         self.msg_if = MsgIF(log_name = self.class_name)
         self.msg_if.pub_info("Starting Node Initialization Processes")
 
-        ##############################  
+        ##############################
         # Initialize Class Variables
+
+        self.cap_settings = copy.deepcopy(self.CAP_SETTINGS)
+
+        # Softstop limits are tracked here, not on the servo. The SVX device has no
+        # soft-limit command -- SVXCapabilitiesQuery.has_limit_control is always False --
+        # so this node owns the pan/tilt softstops and seeds them from LIMITS_DICT.
+        self.soft_limits = [self.LIMITS_DICT['min_pan_softstop_deg'],
+                            self.LIMITS_DICT['max_pan_softstop_deg'],
+                            self.LIMITS_DICT['min_tilt_softstop_deg'],
+                            self.LIMITS_DICT['max_tilt_softstop_deg']]
 
         self.pan_connect_if =  ConnectSVXDeviceIF(connect_name = 'pan_servo',
                 namespace = None,
@@ -182,12 +195,12 @@ class ServosPTXNode:
                                     getSettingsFunction=self.getSettings,
                                     factoryControls = self.FACTORY_CONTROLS,
                                     factoryLimits = self.LIMITS_DICT,
-                                    stopMovingCb = None, #self.stopMoving,
-                                    movePanCb = self.movePan,  # Stop command not working on jog
-                                    moveTiltCb = self.moveTilt, # Stop command not working on jog
-                                    movePanSpeedRatioCb = self.movePanSpeedRatio,  # Stop command not working on jog
-                                    moveTiltSpeedRatioCb = self.moveTiltSpeedRatio, # Stop command not working on jog
-                                    getSoftLimitsCb = self.getSoftLimits, # 109 does not return response
+                                    stopMovingCb = self.stopMoving,
+                                    movePanCb = self.movePan,
+                                    moveTiltCb = self.moveTilt,
+                                    movePanSpeedRatioCb = self.movePanSpeedRatio,
+                                    moveTiltSpeedRatioCb = self.moveTiltSpeedRatio,
+                                    getSoftLimitsCb = self.getSoftLimits,
                                     setSoftLimitsCb = self.setSoftLimits,
                                     getSpeedMaxCb = self.getSpeedMax,
                                     setSpeedMaxCb = None, #self.setSpeedMax,
@@ -235,11 +248,16 @@ class ServosPTXNode:
     
     def updateConnectsHandler(self,timer):
 
+        # The interface owns the selection: it persists it and rejects a topic that has
+        # not been discovered yet. Adopt what it reports rather than pushing the local
+        # copy back in. Pushing back here re-sent the startup default 'None' on the first
+        # cycle, which the interface then persisted and save_config()'d.
+        # settingUpdateFunction is the only place a new selection is pushed in.
         if self.pan_connect_if is not None:
-            pan_options = self.pan_connect_if.get_available_topics()
-            pan_selected = self.pan_connect_if.get_selected_topic()
-            if pan_selected != self.pan_selected:
-                self.pan_selected = self.pan_connect_if.set_selected_topic(self.pan_selected)
+            # get_available_topics returns the interface's live internal list, so copy
+            # before filtering. Editing it in place corrupts the selector state.
+            pan_options = list(self.pan_connect_if.get_available_topics())
+            self.pan_selected = self.pan_connect_if.get_selected_topic()
             if self.tilt_selected != None and self.tilt_selected in pan_options:
                 pan_options.remove(self.tilt_selected)
             self.pan_options = ['None'] + pan_options
@@ -250,12 +268,10 @@ class ServosPTXNode:
                 self.pan_speed_max_dps = 1
 
         if self.tilt_connect_if is not None:
-            tilt_options = self.tilt_connect_if.get_available_topics()
-            tilt_selected = self.tilt_connect_if.get_selected_topic()
-            if tilt_selected != self.tilt_selected:
-                self.tilt_selected = self.tilt_connect_if.set_selected_topic(self.tilt_selected)
+            tilt_options = list(self.tilt_connect_if.get_available_topics())
+            self.tilt_selected = self.tilt_connect_if.get_selected_topic()
             if self.pan_selected != None and self.pan_selected in tilt_options:
-                tilt_options.remove(self.tilt_selected)
+                tilt_options.remove(self.pan_selected)
             self.tilt_options = ['None'] + tilt_options
             self.tilt_connected = self.tilt_connect_if.check_connection()
             if self.tilt_connected == True:
@@ -263,18 +279,24 @@ class ServosPTXNode:
             else:
                 self.tilt_speed_max_dps = 1
 
-        nepi_sdk.start_timer_process(1, self.updatePositionHandler, oneshot = True)
+        nepi_sdk.start_timer_process(1, self.updateConnectsHandler, oneshot = True)
 
 
     def updatePositionHandler(self,timer):
         stime=nepi_utils.get_time()
-        current_position = self.driver_getPosition(wait_on_busy = False)
-        if current_position[0] is not None:
-            self.current_position[0] = current_position[0]
-            self.position_times[0] = nepi_utils.get_time()
-        if current_position[1] is not None:
-            self.current_position[1] = current_position[1]
-            self.position_times[1] = nepi_utils.get_time()
+        # Positions come from the two servo interfaces, one axis each, and are stored in
+        # the node frame -- the same frame gotoPosition() takes and getPosition() reports.
+        # The interfaces report in the device frame, so apply the axis direction here.
+        if self.pan_connect_if is not None and self.pan_connected == True:
+            pan_deg = self.pan_connect_if.get_servo_position()
+            if pan_deg is not None:
+                self.current_position[0] = pan_deg * self.PAN_DEG_DIR
+                self.position_times[0] = nepi_utils.get_time()
+        if self.tilt_connect_if is not None and self.tilt_connected == True:
+            tilt_deg = self.tilt_connect_if.get_servo_position()
+            if tilt_deg is not None:
+                self.current_position[1] = tilt_deg * self.TILT_DEG_DIR
+                self.position_times[1] = nepi_utils.get_time()
         #self.msg_if.pub_info("Got current position :" + str(self.current_position))
         #self.msg_if.pub_info("Got position times :" + str(self.position_times))
         gtime = nepi_utils.get_time() - stime
@@ -289,8 +311,10 @@ class ServosPTXNode:
         navpose_dict['has_orientation'] = True
         navpose_dict['time_oreantation'] = nepi_utils.get_time()
         navpose_dict['roll_deg'] = 0.0
-        navpose_dict['yaw_deg'] = pan_deg * self.PAN_DEG_DIR
-        navpose_dict['pitch_deg'] = tilt_deg * self.TILT_DEG_DIR
+        # current_position is already in the node frame; the axis direction was applied
+        # when it was sampled. Applying it again here inverted both axes.
+        navpose_dict['yaw_deg'] = pan_deg
+        navpose_dict['pitch_deg'] = tilt_deg
         return navpose_dict
 
 
@@ -299,10 +323,9 @@ class ServosPTXNode:
 
 
     def getCapSettings(self):
-        self.cap_settings['']
         self.cap_settings['pan_servo']['options'] = self.pan_options
         self.cap_settings['tilt_servo']['options'] = self.tilt_options
-        return self.CAP_SETTINGS
+        return self.cap_settings
 
     def getFactorySettings(self):
         settings = self.getSettings()
@@ -327,18 +350,8 @@ class ServosPTXNode:
             if setting_name == 'tilt_connected':
                 val = self.tilt_connected
             setting['value'] = str(val)
+            settings[setting_name] = setting
         return settings
-
-
-
-    def setSetting(self,setting_name,val):
-        success = False
-        if setting_name in self.settingFunctions.keys():
-            function_str_name = self.settingFunctions[setting_name]['set']
-            #self.msg_if.pub_info("Calling set setting function " + function_str_name)
-            set_function = globals()[function_str_name]
-            success = set_function(self,val)
-        return success
 
 
     def settingUpdateFunction(self,setting):
@@ -347,15 +360,25 @@ class ServosPTXNode:
         [setting_name, s_type, data] = nepi_settings.get_data_from_setting(setting)
         setting_updated = False
         msg = "Success"
+        # This is the only place a selection is pushed into a connect interface.
+        # The interface may reject an undiscovered topic, so adopt what it returns.
         if setting_name in self.cap_settings.keys():
             if setting_name == 'pan_servo':
-                self.pan_selected = data
+                if self.pan_connect_if is not None:
+                    self.pan_selected = self.pan_connect_if.set_selected_topic(data)
+                else:
+                    self.pan_selected = data
                 setting_updated = True
             if setting_name == 'tilt_servo':
-                self.tilt_selected = data
+                if self.tilt_connect_if is not None:
+                    self.tilt_selected = self.tilt_connect_if.set_selected_topic(data)
+                else:
+                    self.tilt_selected = data
                 setting_updated = True
         if setting_updated is False:
-            msg = (self.node_name  + " Setting name" + setting_str + " is not supported")                 
+            msg = (self.node_name  + " Setting name" + setting_str + " is not supported")
+        else:
+            success = True
         return success, msg
 
 
@@ -364,13 +387,20 @@ class ServosPTXNode:
     ### PTX IF Functions
 
     def stopMoving(self):
+        success = False
         if self.pan_connect_if is not None:
-            self.pan_connect_if.stop_moving()
+            success = self.pan_connect_if.stop_moving()
         if self.tilt_connect_if is not None:
-            self.tilt_connect_if.stop_moving()
+            success = self.tilt_connect_if.stop_moving() or success
+        return success
 
     def movePan(self, direction, duration):
         if self.pan_connect_if is not None:
+            # Normalize and apply the axis direction the same way movePanSpeedRatio does.
+            # Passing the caller's direction straight through made the two jog paths
+            # disagree on sign, so a jog reversed when a speed was supplied.
+            direction = self.PT_DIRECTION_POSITIVE if direction == 1 else self.PT_DIRECTION_NEGATIVE
+            direction = direction * self.PAN_DEG_DIR
             success = self.pan_connect_if.move_direction(direction)
             if success:
                 if duration > 0:
@@ -380,6 +410,8 @@ class ServosPTXNode:
 
     def moveTilt(self, direction, duration):
         if self.tilt_connect_if is not None:
+            direction = self.PT_DIRECTION_POSITIVE if direction == 1 else self.PT_DIRECTION_NEGATIVE
+            direction = direction * self.TILT_DEG_DIR
             success = self.tilt_connect_if.move_direction(direction)
             if success:
                 if duration > 0:
@@ -410,40 +442,17 @@ class ServosPTXNode:
                     nepi_sdk.sleep(duration)
                     self.tilt_connect_if.stop_moving()
 
-            
-
-            if success:
-                if duration > 0:
-                    nepi_sdk.sleep(duration)
-                    while success == False:
-                        self.driver_stopAxisMotion(axis_str = axis_str)
-                        nepi_sdk.sleep(self.serial_send_delay)
-
-        
 
     def setSoftLimits(self, min_pan,max_pan,min_tilt,max_tilt):
-        # TODO: Limits checking and driver unit conversion?
-        if self.PAN_DEG_DIR == -1:
-            min_pan_adj = max_pan * -1
-            max_pan_adj = min_pan * -1
-        else:
-            min_pan_adj = min_pan
-            max_pan_adj = max_pan
-        if self.TILT_DEG_DIR == -1:
-            min_tilt_adj = max_tilt * -1
-            max_tilt_adj = min_tilt * -1
-        else:
-            min_tilt_adj = min_tilt
-            max_tilt_adj = max_tilt
-
-        if (min_pan_adj < max_pan_adj) and (min_tilt_adj < max_tilt_adj):
-            self.driver_setSoftLimits(min_pan_adj, max_pan_adj, min_tilt_adj, max_tilt_adj)
+        # Stored in the node frame, the frame the caller and getSoftLimits() both use.
+        # The SVX device has no soft-limit command, so there is nothing to push down and
+        # nothing to convert; the earlier axis-direction swap here only mattered for a
+        # driver-side write that never existed.
+        if (min_pan < max_pan) and (min_tilt < max_tilt):
+            self.soft_limits = [min_pan, max_pan, min_tilt, max_tilt]
 
     def getSoftLimits(self):
-        # TODO: Driver unit conversion?
-        [min_pan,max_pan,min_tilt,max_tilt] = self.driver_getSoftLimits()
-        soft_limits = [min_pan,max_pan,min_tilt,max_tilt]
-        return soft_limits
+        return list(self.soft_limits)
 
 
 
@@ -479,31 +488,50 @@ class ServosPTXNode:
 
 
     def setPanSpeedRatio(self, ratio):
+        # A 0-1 ratio, not degrees per second. Sending it to set_max_speed_dps() set the
+        # servo maximum to a fraction of a degree per second instead of scaling the speed.
         if self.pan_connect_if is not None and self.pan_connected == True:
-            self.pan_connect_if.set_max_speed_dps(ratio)       
+            self.pan_connect_if.set_max_speed_ratio(ratio)
+        self.speed_ratio = ratio
 
     def setTiltSpeedRatio(self, ratio):
         if self.tilt_connect_if is not None and self.tilt_connected == True:
-            self.tilt_connect_if.set_max_speed_dps(ratio)       
+            self.tilt_connect_if.set_max_speed_ratio(ratio)
+        self.speed_ratio = ratio
 
     def setSpeedRatio(self, ratio):
         self.setPanSpeedRatio(ratio)
         self.setTiltSpeedRatio(ratio)
 
-        
+
 
     def getPanSpeedRatio(self):
-        return self.pan_connect_if.set_max_speed_ratio()
+        # Never returns None: PTXActuatorIF applies math.floor() to this directly.
+        ratio = None
+        if self.pan_connect_if is not None and self.pan_connected == True:
+            ratio = self.pan_connect_if.get_speed_ratio()
+        if ratio is None:
+            ratio = self.speed_ratio
+        return ratio
 
     def getTiltSpeedRatio(self):
-        return self.tilt_connect_if.set_max_speed_ratio()
+        ratio = None
+        if self.tilt_connect_if is not None and self.tilt_connected == True:
+            ratio = self.tilt_connect_if.get_speed_ratio()
+        if ratio is None:
+            ratio = self.speed_ratio
+        return ratio
 
     def getSpeedRatio(self):
         return max(self.getPanSpeedRatio(), self.getTiltSpeedRatio())
-    
+
+    def getPosition(self):
+        return list(self.current_position)
+
     def getPositionTimes(self):
         return self.position_times
-    
+
+
     def gotoPosition(self, pan_deg, tilt_deg):
         self.pan_connect_if.goto_position(pan_deg * self.PAN_DEG_DIR)
         self.tilt_connect_if.goto_position(tilt_deg * self.TILT_DEG_DIR)
@@ -516,7 +544,7 @@ class ServosPTXNode:
         
     def goHome(self):
         self.gotoPanPosition(self.home_pan_deg)
-        self.gotoTiltPosition(self.home_pan_deg)
+        self.gotoTiltPosition(self.home_tilt_deg)
 
     def setHomePosition(self, pan_deg, tilt_deg):
         self.home_pan_deg = pan_deg * self.PAN_DEG_DIR
@@ -538,9 +566,10 @@ class ServosPTXNode:
     #######################
     ### Cleanup processes on node shutdown
     def cleanup_actions(self):
+        # This node owns no serial port; the servo drivers do. Leaving the axes stopped
+        # is the only cleanup it can do, and it matters because a jog runs until stopped.
         self.msg_if.pub_info("Shutting down: Executing script cleanup actions")
-        if self.serial_port is not None:
-            self.serial_port.close()
+        self.stopMoving()
 
 
 if __name__ == '__main__':
