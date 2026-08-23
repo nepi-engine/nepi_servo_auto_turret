@@ -1,0 +1,15 @@
+APP_DICT:
+  display_name: Auto Turret
+  description: Pan Tilt turret automation application
+  pkg_name: nepi_app_auto_turret
+  group_name: AUTOMATION
+  config_file: app_auto_turret.yaml
+  app_file: auto_turret_app_node.py
+  node_name: app_auto_turret
+  license_type: Numurus Software License
+  license_link: https://numurus.com/wp-content/uploads/Numurus-Software-License-Terms.pdf
+RUI_DICT:
+  rui_files:
+  - NepiAppAutoTurret.js
+  rui_main_file: NepiAppAutoTurret.js
+  rui_main_class: NepiAppAutoTurret

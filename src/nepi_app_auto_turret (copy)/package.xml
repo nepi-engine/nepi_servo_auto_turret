@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>nepi_app_pan_tilt_auto</name>
+  <name>nepi_app_auto_turret</name>
   <version>0.0.0</version>
   <description>The Pan And Tilt automation package</description>
 

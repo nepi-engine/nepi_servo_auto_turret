@@ -7,7 +7,7 @@ This file is part of nepi-engine
 License: 3-clause BSD, see https://opensource.org/licenses/BSD-3-Clause
 ]]
 cmake_minimum_required(VERSION 3.5)
-project(nepi_app_pan_tilt_auto)
+project(nepi_app_auto_turret)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -168,7 +168,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
  catkin_install_python(PROGRAMS
-   scripts/pan_tilt_auto_app_node.py
+   scripts/auto_turret_app_node.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 
