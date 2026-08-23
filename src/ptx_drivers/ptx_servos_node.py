@@ -239,11 +239,25 @@ class ServosPTXNode:
 
 
     def getDeviceInfo(self):
+        # These five keys are the contract: device_if_ptx.py reads device_name,
+        # path, serial_number, hw_version and sw_version straight off this dict
+        # with no .get() and no guard, so a differently-keyed dict is a KeyError
+        # at IF construction, not a missing status field. Keep them in sync with
+        # the device_info_dict class attribute above.
+        #
+        # There is no hardware to interrogate here. This node is a composite of
+        # two SVX servo devices, each of which reports its own serial/versions
+        # through its own SVX interface, so identity comes from the node name
+        # discovery assigned (via get_device_alias) and the rest stay Unknown.
+        # The other PTX drivers read device_name from drv_dict['DEVICE_DICT'],
+        # which the servos discovery does not build -- it launches one node
+        # unconditionally rather than one per discovered hardware path.
         dev_info = dict()
-        dev_info["Manufacturer"] = 'Unknown'
-        dev_info["Model"] = 'Unknown'
-        dev_info["FirmwareVersion"] = 'Unknown'
-        dev_info["SerialNum"] = 'Unknown'
+        dev_info["device_name"] = self.node_name
+        dev_info["path"] = ""
+        dev_info["serial_number"] = self.serial_num
+        dev_info["hw_version"] = self.hw_version
+        dev_info["sw_version"] = self.sw_version
         return dev_info
     
     def updateConnectsHandler(self,timer):
