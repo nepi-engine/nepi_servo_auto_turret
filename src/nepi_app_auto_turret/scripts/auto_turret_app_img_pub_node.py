@@ -228,7 +228,7 @@ class AutoTurretImgPub:
 
 
         # Create auto_turret image publisher
-        img_pub_topic = os.path.join(self.nod, self.AUTO_TURRET_IMG_DATA_PRODUCT)
+        img_pub_topic = os.path.join(self.node_namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT)
         self.img_if = ColorImageIF(namespace = img_pub_topic,
                         data_product = self.AUTO_TURRET_IMG_DATA_PRODUCT,
                         data_source_description = 'image',

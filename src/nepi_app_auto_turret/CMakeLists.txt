@@ -7,7 +7,7 @@ This file is part of nepi-engine
 License: 3-clause BSD, see https://opensource.org/licenses/BSD-3-Clause
 ]]
 cmake_minimum_required(VERSION 3.5)
-project(nepi_app_obstacles)
+project(nepi_app_auto_turret)
 
 # sensor_msgs, geometry_msgs, and nav_msgs are not used by this package's own
 # messages. They are nepi_interfaces' MSG_DEP_SET, and genmsg resolves a message
@@ -26,10 +26,7 @@ nepi_interfaces
 
 ## Generate messages in the 'msg' folder
  add_message_files(FILES
-	Obstacle.msg
-	Obstacles.msg
-	ObstaclesDepthMap.msg
-	ObstaclesStatus.msg
+	AutoTurretStatus.msg
 
  )
 
@@ -63,15 +60,10 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
  catkin_install_python(PROGRAMS
-   scripts/obstacles_app_node.py
-   scripts/obstacles_app_img_pub_node.py
+   scripts/auto_turret_app_node.py
+   scripts/auto_turret_app_img_pub_node.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
-
-# Install etc files (startup scripts, factory configs, etc.) to the global (not project) etc destination
-install(DIRECTORY etc/
-  DESTINATION ${CATKIN_GLOBAL_ETC_DESTINATION}
-)
 
 
 if(NOT NEPI_BASE)
@@ -121,16 +113,6 @@ install(DIRECTORY sdk/
   FILES_MATCHING PATTERN "*.py"
 )
 
-
-set( NEPI_API_FOLDER
-  # Must hard-coded
-  ${NEPI_ENGINE}/lib/python3/dist-packages/nepi_api
-)
-
-install(DIRECTORY api/
-  DESTINATION ${NEPI_API_FOLDER}
-  FILES_MATCHING PATTERN "*.py"
-)
 
 
 ## Install NEPI RUI Files

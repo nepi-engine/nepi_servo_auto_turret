@@ -25,16 +25,22 @@ import Label from "./Label"
 import { Column, Columns } from "./Columns"
 import Select, { Option } from "./Select"
 import Styles from "./Styles"
+import Input from "./Input"
+import Button, { ButtonMenu } from "./Button"
 import AsyncToggle from "./AsyncToggle"
 import BooleanIndicator from "./BooleanIndicator"
 import { SliderAdjustment } from "./AdjustmentWidgets"
 
 import NepiIFImageViewer from "./Nepi_IF_ImageViewer"
+import NepiIFConnectPTX from "./Nepi_IF_ConnectPTX"
+import NepiIFConnectIDX from "./Nepi_IF_ConnectIDX"
+import NepiIFConnectTargets from "./Nepi_IF_ConnectTargets"
 import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
 
 import { createMenuFirstLastNames } from "./Utilities"
+import { setElementStyleModified, clearElementStyleModified } from "./Utilities"
 
 function round(value, decimals = 0) {
   return Number(value).toFixed(decimals)
@@ -43,17 +49,18 @@ function round(value, decimals = 0) {
 @inject("ros")
 @observer
 
-// Obstacles app main panel. Left column is the overlay image viewer, right
-// column is the app panel: depth map source selection, process controls, the
-// algorithm's ControlsIF box, overlay toggles and status.
+// Auto Turret app main panel. Left column (75%) is the overlay image viewer with
+// its four display toggles and the save-data block; right column (23%) is the app
+// panel: source selection, scan/track/stabilize enables, status and settings.
+// Full screen collapses to the viewer alone.
 //
 // This page binds to ONE app node, not to a manager list. The status topic is
-// <app>/auto_turret/status carrying nepi_app_auto_turret/ObstaclesStatus, and every
-// command topic hangs off the namespace that message reports in
-// process_status.namespace -- which is <app>/auto_turret, the namespace
-// ObstaclesIF registers its subscribers on. The algorithm's own controls are
-// rendered by the shared Nepi_IF_Controls against status_msg.controls_topic.
-class NepiAppObstacles extends Component {
+// <app>/status carrying nepi_app_auto_turret/AutoTurretStatus, and every command
+// topic hangs off the app namespace. The algorithm's own controls are rendered by
+// the shared Nepi_IF_Controls against status_msg.controls_topic -- a field
+// AutoTurretStatus does not yet define, so that block falls back to <app>/controls
+// and stays empty until either the field or a ControlsIF is added.
+class NepiAppAutoTurret extends Component {
 
   constructor(props) {
     super(props)
@@ -90,7 +97,6 @@ class NepiAppObstacles extends Component {
 
     this.getDisplayImgOptions = this.getDisplayImgOptions.bind(this)
     this.onDisplayImgSelected = this.onDisplayImgSelected.bind(this)
-    this.getSegmentImgTopics = this.getSegmentImgTopics.bind(this)
 
 
     this.onPTUpdateText = this.onPTUpdateText.bind(this)
@@ -169,7 +175,7 @@ class NepiAppObstacles extends Component {
     }
     var statusListener = this.props.ros.setupStatusListener(
           statusNamespace,
-          "nepi_app_auto_turret/ObstaclesStatus",
+          "nepi_app_auto_turret/AutoTurretStatus",
           this.statusListener
         )
     this.setState({
@@ -210,7 +216,7 @@ class NepiAppObstacles extends Component {
   //////////////////////////
   // Source selection
 
-  // Options come from the app's own available_source_topics, which ObstaclesIF
+  // Options come from the app's own available_source_topics, which the app node
   // fills by discovering DepthMapStatus publishers. The RUI does not do its own
   // topic filtering -- the node is the single source of truth for what this
   // process can consume.
@@ -270,7 +276,7 @@ class NepiAppObstacles extends Component {
     const status_msg = this.state.status_msg
 
     return (
-      <Section title={"Obstacles"}>
+      <Section title={"Auto Turret"}>
 
         <div hidden={(status_msg != null)}>
           <pre style={{ height: "50px", overflowY: "auto" }} align={"left"} textAlign={"left"}>
@@ -291,6 +297,8 @@ class NepiAppObstacles extends Component {
     const process_status_msg = this.state.process_status_msg
     const process_namespace = this.getProcessNamespace()
     const controls_namespace = this.getControlsNamespace()
+    // Each connector registers under <node namespace>/<connect_name>.
+    const app_namespace = this.getAppNamespace()
 
     const enabled = process_status_msg.enabled
     const running = process_status_msg.running
@@ -304,15 +312,11 @@ class NepiAppObstacles extends Component {
 
     const auto_select_active = process_status_msg.auto_select_active
 
-    const selected_sources = process_status_msg.selected_sources
-
     const source_selected = process_status_msg.source_selected
     const source_connected = process_status_msg.source_connected
 
     const avg_process_latency = round(process_status_msg.avg_process_latency, 3)
     const avg_process_rate = round(process_status_msg.avg_process_rate, 3)
-
-    const source_options = this.createSourceTopicsOptions()
 
     const navpose_connected = status_msg.navpose_topic_connected
 
@@ -350,46 +354,46 @@ class NepiAppObstacles extends Component {
       <Columns>
       <Column>
 
-        <Columns>
-        <Column>
+        <Label title="Auto Select Source">
+          <AsyncToggle
+            checked={auto_select_active === true}
+            onClick={() => sendBoolMsg(process_namespace + "/set_auto_select_enable", !auto_select_active)}>
+          </AsyncToggle>
+        </Label>
 
-          <Label title="Auto Select Source">
-            <AsyncToggle
-              checked={auto_select_active === true}
-              onClick={() => sendBoolMsg(process_namespace + "/set_auto_select_enable", !auto_select_active)}>
-            </AsyncToggle>
-          </Label>
+        {/* The three source rows. Each connector owns its own selector,
+            available list, connection indicator and status readout, published
+            as a ConnectIFStatus on its own connect namespace -- see the
+            Connect*IF instances in auto_turret_app_node.py. This page only
+            points each component at the right namespace. */}
 
+        <NepiIFConnectPTX
+          namespace={app_namespace + "/ptx_connect"}
+          title={"Pan Tilt"}
+          show_selector={true}
+          show_controls={false}
+          show_data={true}
+          make_section={false}
+        />
 
+        <NepiIFConnectIDX
+          namespace={app_namespace + "/idx_connect"}
+          title={"Image"}
+          show_selector={true}
+          show_controls={false}
+          show_data={true}
+          make_section={false}
+        />
 
-        </Column>
-        <Column>
+        <NepiIFConnectTargets
+          namespace={app_namespace + "/targets_connect"}
+          title={"Detector"}
+          show_selector={true}
+          show_controls={false}
+          show_data={true}
+        />
 
-          <div style={{ marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-
-          <Label title={"Select Pan Tilt"} />
-          
-          <div onClick={this.toggleSourcesListViewable} style={{ backgroundColor: Styles.vars.colors.grey0 }}>
-            <Select style={{ width: "10px" }} />
-          </div>
-          <div hidden={this.state.sources_list_viewable === false}>
-          {source_options.map((source) =>
-            <div onClick={this.onSourceTopicSelected}
-              style={{
-                textAlign: "center",
-                padding: `${Styles.vars.spacing.xs}`,
-                color: Styles.vars.colors.black,
-                backgroundColor: (selected_sources.indexOf(source.props.value) !== -1) ?
-                  Styles.vars.colors.blue : Styles.vars.colors.grey0,
-                cursor: "pointer",
-              }}>
-              <body source-topic={source} style={{ color: Styles.vars.colors.black }}>{source}</body>
-            </div>
-          )}
-          </div>
-
-        </Column>
-        </Columns>
+        <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
         <Columns>
         <Column>
@@ -509,7 +513,7 @@ class NepiAppObstacles extends Component {
         {(controls_namespace != null) ?
           <NepiIFControls
             namespace={controls_namespace}
-            title={"Obstacle Detection Controls"}
+            title={"Auto Turret Controls"}
           />
         : null}
 
@@ -1064,7 +1068,11 @@ const namespace = this.getNamespace()
 
 
   renderImageViewer() {
-    const {sendBoolMsg } = this.props.ros
+    const { sendBoolMsg, imageTopics } = this.props.ros
+    const status_msg = this.state.status_msg
+    const process_namespace = this.getProcessNamespace()
+    const save_data_topic = this.getSaveNamespace()
+
     const selected_image_topic_topic = this.state.selected_display_topic
     const img_publishing = imageTopics.indexOf(selected_image_topic_topic) !== -1
 
@@ -1072,11 +1080,12 @@ const namespace = this.getNamespace()
     const selected_image_topic_text = (selected_image_topic_topic === 'None') ? 'No Image Selected' :
       img_publishing ? this.state.selected_display_text : 'Waiting for image to publish'
 
-
-    const full_screen_enabled = status_msg.full_screen_enabled
-    const show_targets_enabled = status_msg.show_targets_enabled
-    const show_track_enabled = status_msg.show_track_enabled
-    const show_crosshair_enabled = status_msg.show_crosshair_enabled
+    // status_msg is null until the first status arrives; the toggles render
+    // unchecked rather than throwing on a null dereference.
+    const full_screen_enabled = (status_msg !== null) ? status_msg.show_full_screen : false
+    const show_targets_enabled = (status_msg !== null) ? status_msg.show_targets_enabled : false
+    const show_track_enabled = (status_msg !== null) ? status_msg.show_track_enabled : false
+    const show_crosshair_enabled = (status_msg !== null) ? status_msg.show_crosshair_enabled : false
     return (
            <Section>
 
@@ -1123,7 +1132,7 @@ const namespace = this.getNamespace()
 
                         <Label title="Show Track">
                           <AsyncToggle
-                            checked={show_targets_enabled === true}
+                            checked={show_track_enabled === true}
                             onClick={() => sendBoolMsg(process_namespace + "/set_show_track", show_track_enabled === false)}>
                           </AsyncToggle>
                         </Label>
@@ -1154,44 +1163,10 @@ const namespace = this.getNamespace()
                       </div>
 
 
-  
-                      <div style={{ width: '10%' }} centered={"true"}  hidden={image_stab_supported === false}>
-
-                          {/* <Label title={'Image Stab'}>
-                              <AsyncToggle style={{justifyContent: "flex-right"}} 
-                                checked={image_stab_enabled === true} 
-                                onClick={() => sendBoolMsg.bind(this)(image_stab_update_topic,!image_stab_enabled)} />
-                            </Label> */}
-
-
-                      </div>
-
-
-                      <div style={{ width: '5%' }} centered={"true"} >
-                        {null}
-                      </div>
-
-                      <div style={{ width: '10%' }} centered={"true"} >
-
-                          <Label title={'Full Screen'}>
-                              <AsyncToggle style={{justifyContent: "flex-right"}} 
-                                checked={full_screen_enabled === true} 
-                                onClick={() => sendBoolMsg.bind(this)(full_screen_update_topic,!full_screen_enabled)} />
-                            </Label>
-
-
-                      </div>
-
-
-                      <div style={{ width: '5%' }} centered={"true"} >
-                        {null}
-                      </div>
-
-
-                      <div style={{ width: '10%' }} centered={"true"} hidden={show_selectors_option === false}>
-
-
-                    </div>
+                      {/* Image Stab toggle: no image_stab field in AutoTurretStatus yet.
+                          A second Full Screen toggle and a source-selector slot were also
+                          carried over from the source app; both are dropped -- the Full
+                          Screen toggle above is the live one. */}
 
 
                 </div>
@@ -1217,32 +1192,55 @@ const namespace = this.getNamespace()
 
 
 
+  // Image viewer and save-data on the left, controls on the right, matching the
+  // 75/2/23 split the other apps use. Full screen collapses to the viewer alone.
   render() {
     const status_msg = this.state.status_msg
     const save_data_topic = this.getSaveNamespace()
+    const full_screen_enabled = (status_msg !== null) ? status_msg.show_full_screen : false
+
+    if (full_screen_enabled === true) {
+      return (
+        <React.Fragment>
+          {this.renderImageViewer()}
+        </React.Fragment>
+      )
+    }
 
     return (
-      <Columns>
-      <Column equalWidth={false}>
+      <React.Fragment>
 
-        {this.renderImageViewer()}
+        <div style={{ display: 'flex' }}>
 
-        {(save_data_topic !== 'None' && this.state.connected === true) ?
-          <NepiIFSaveData
-            saveNamespace={save_data_topic}
-            title={"Nepi_IF_SaveData"}
-          />
-        : null}
+          <div style={{ width: '75%' }}>
 
+            {this.renderImageViewer()}
 
+            {(save_data_topic !== 'None' && this.state.connected === true) ?
+              <NepiIFSaveData
+                saveNamespace={save_data_topic}
+                title={"Nepi_IF_SaveData"}
+              />
+            : null}
 
-        {this.renderApp()}
+          </div>
 
-      </Column>
-      </Columns>
+          <div style={{ width: '2%' }} centered={"true"} >
+            {}
+          </div>
+
+          <div style={{ width: '23%' }}>
+
+            {this.renderApp()}
+
+          </div>
+
+        </div>
+
+      </React.Fragment>
     )
   }
 
 }
 
-export default NepiAppObstacles
+export default NepiAppAutoTurret

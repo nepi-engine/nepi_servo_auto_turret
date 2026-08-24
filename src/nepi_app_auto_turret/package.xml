@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>nepi_app_obstacles</name>
+  <name>nepi_app_auto_turret</name>
   <version>0.0.0</version>
-  <description>Obstacle localization app: segments a depth map into ground and obstacles and publishes located obstacles</description>
+  <description>Pan Tilt turret automation application</description>
 
   <maintainer email="nepi@numurus.com">numurus</maintainer>
 

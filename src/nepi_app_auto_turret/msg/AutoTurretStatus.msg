@@ -4,11 +4,14 @@ nepi_interfaces/ProcessStatus process_status
 
 nepi_interfaces/DevicePTXStatus pt_status_msg
 
-string[] avaiable_image_topics
+# Source selection lives on the connect interfaces, not here. Each of
+# <app>/ptx_connect, <app>/idx_connect and <app>/targets_connect publishes its
+# own available list, selection and connection state, and the RUI renders those
+# rows from Nepi_IF_ConnectPTX / Nepi_IF_ConnectIDX / Nepi_IF_ConnectTargets.
+#
+# selected_image_topic stays because it is a parent-to-child contract, not a RUI
+# field: auto_turret_app_img_pub_node.py reads it to pick the image it overlays.
 string selected_image_topic
-
-string[] avaiable_detector_topics
-string selected_detector_topic
 
 bool has_navpose
 string navpose_topic
@@ -56,6 +59,6 @@ string image_pub_topic
 
 bool show_full_screen
 bool show_targets_enabled
-bool show_track_enabled = msg.show_track_enabled
-bool show_crosshair_enabled = msg.show_crosshair_enabled
+bool show_track_enabled
+bool show_crosshair_enabled
 float32[] crosshair_offset_degs
