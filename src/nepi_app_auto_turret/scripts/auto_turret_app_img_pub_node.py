@@ -269,6 +269,7 @@ class AutoTurretImgPub:
     def createImgInfoDict(self, source_topic):
         img_info_dict = dict()
         img_info_dict['source_topic'] = source_topic
+        img_info_dict['pub_namespace'] = self.process_namespace
         img_info_dict['active'] = True
         img_info_dict['img_connected'] = False
         img_info_dict['img_published'] = False
@@ -389,7 +390,7 @@ class AutoTurretImgPub:
         cur_time = nepi_utils.get_time()
         elapsed = cur_time - self.last_track_time
         if elapsed > WATCHDOG_TRACK_TIMEOUT:
-            self.targets_dict_list = None
+            self.track_dict = None
 
         nepi_sdk.start_timer_process(1, self.watchdogCb, oneshot = True)
 
@@ -525,7 +526,7 @@ class AutoTurretImgPub:
             height_deg = 70
 
         targets_dict_list = copy.deepcopy(self.targets_dict_list)
-        draw_targets = (len(targets_dict_list) > 0 and self.show_targets_enabled == True)
+        draw_targets = (targets_dict_list is not None and len(targets_dict_list) > 0 and self.show_targets_enabled == True)
 
         track_dict = copy.deepcopy(self.track_dict)
         draw_track = (track_dict is not None and self.show_track_enabled == True)
