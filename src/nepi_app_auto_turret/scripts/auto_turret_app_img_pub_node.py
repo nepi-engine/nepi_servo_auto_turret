@@ -59,7 +59,7 @@ OVERLAY_LINE_TYPE = cv2.LINE_AA
 
 class AutoTurretImgPub:
 
-    AUTO_TURRET_IMG_DATA_PRODUCT = 'color_image'
+    AUTO_TURRET_IMG_DATA_PRODUCT = 'process_image'
 
     DATA_PRODUCTS = [AUTO_TURRET_IMG_DATA_PRODUCT]
 
@@ -75,13 +75,13 @@ class AutoTurretImgPub:
     last_image_time = 0
 
     img_if = None
-    img_node_dict = dict()
+    img_node_dict = None
     img_node_lock = threading.Lock()
 
-    img_info_dict = dict()
+    img_info_dict = None
     img_info_lock = threading.Lock()
 
-    targets_dict_list = dict()
+    targets_dict_list = []
     targets_lock = threading.Lock()
     last_targets_time = 0
     show_targets_enabled = False
@@ -456,12 +456,13 @@ class AutoTurretImgPub:
         self.img_node_lock.release()
 
         self.img_info_lock.acquire()
-        self.img_info_dict['active'] = False
-        self.img_info_dict['status_dict'] = None
-        self.img_info_dict['connected'] = False
-        self.img_info_dict['publishing'] = False
-        self.img_info_dict['img_connected'] = False
-        self.img_info_dict['img_published'] = False
+        self.img_info_dict = None
+        # self.img_info_dict['active'] = False
+        # self.img_info_dict['status_dict'] = None
+        # self.img_info_dict['connected'] = False
+        # self.img_info_dict['publishing'] = False
+        # self.img_info_dict['img_connected'] = False
+        # self.img_info_dict['img_published'] = False
         self.img_info_lock.release()
 
         return True
@@ -478,6 +479,8 @@ class AutoTurretImgPub:
 
     def imageStatusCb(self, status_msg, args):
         source_topic = args
+        if self.img_info_dict is None:
+            return
         if source_topic not in self.img_info_dict.keys():
             return
         self.img_info_lock.acquire()
@@ -490,9 +493,9 @@ class AutoTurretImgPub:
 
     def imageCb(self, image_msg, args):
         source_topic = args
-        if self.imaging_enabled == False or source_topic != self.selected_image_topic:
+        if self.imaging_enabled == False or source_topic != self.selected_image_topic or self.img_info_dict is None:
             return
-    
+
         if self.img_info_dict['img_connected'] == False:
             self.msg_if.pub_info('Connected to image topic: ' + source_topic)
         self.img_info_dict['img_connected'] = True

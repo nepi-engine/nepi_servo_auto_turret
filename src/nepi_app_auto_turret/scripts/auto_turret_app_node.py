@@ -37,7 +37,7 @@ from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
 from nepi_api.system_if import SaveDataIF
 from nepi_api.connect_device_if_ptx import ConnectPTXDeviceIF
-from nepi_api.connect_device_if_idx import ConnectIDXDeviceIF
+from nepi_api.connect_data_if import ConnectImageIF
 from nepi_api.connect_targets_if import ConnectTargetsIF
 
 
@@ -56,7 +56,7 @@ UPDATER_RATE_HZ = 1.0
 
 IMG_PUB_NODE_SUFFIX = '_img_pub'
 IMG_PUB_NODE_FILE = 'auto_turret_app_img_pub_node.py'
-IMG_PUB_DATA_PRODUCT = 'color_image'
+IMG_PUB_DATA_PRODUCT = 'process_image'
 
 PKG_NAME = 'nepi_app_auto_turret'
 
@@ -88,7 +88,7 @@ class NepiAutoTurretApp(object):
   # Nepi_IF_ConnectIDX, Nepi_IF_ConnectTargets) render each row off that status,
   # so this node neither discovers nor selects sources itself.
   ptx_connect_if = None
-  idx_connect_if = None
+  img_connect_if = None
   targets_connect_if = None
 
   pt_connected = False
@@ -498,29 +498,30 @@ class NepiAutoTurretApp(object):
                                     stopPanCb = self.stopPanCb,
                                     stopTiltCb = self.stopTiltCb,
                                     show_selector = True,
-                                    show_controls = True,
-                                    show_data = True,
+                                    show_controls = False,
+                                    show_data = False,
                                     msg_if = self.msg_if
                                     )
 
-    self.idx_connect_if = ConnectIDXDeviceIF(
+    self.img_connect_if = ConnectImageIF(
+                                    filter_topic_list = ['color_image'],
                                     show_selector = True,
-                                    show_controls = True,
-                                    show_data = True,
+                                    show_controls = False,
+                                    show_data = False,
                                     msg_if = self.msg_if
                                     )
 
     self.targets_connect_if = ConnectTargetsIF(
                                     dataCB = self.targetsDataCb,
                                     show_selector = True,
-                                    show_controls = True,
-                                    show_data = True,
+                                    show_controls = False,
+                                    show_data = False,
                                     msg_if = self.msg_if
                                     )
 
     for name, connect_if in [('pan tilt', self.ptx_connect_if),
-                              ('image', self.idx_connect_if),
-                              ('detector', self.targets_connect_if)]:
+                              ('image', self.img_connect_if),
+                              ('targets', self.targets_connect_if)]:
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
 
@@ -583,7 +584,7 @@ class NepiAutoTurretApp(object):
     # This updater only samples their connection state for the status message
     # and re-asserts the stored speed ratios when a pan tilt device connects.
     self.pt_connected = self.checkConnected(self.ptx_connect_if)
-    self.image_connected = self.checkConnected(self.idx_connect_if)
+    self.image_connected = self.checkConnected(self.img_connect_if)
     self.detector_connected = self.checkConnected(self.targets_connect_if)
     self.pushSpeedRatios()
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
@@ -679,25 +680,25 @@ class NepiAutoTurretApp(object):
   # connector's own available list, so no membership check is needed here.
 
   def setImageTopic(self, topic):
-    if self.idx_connect_if is None:
+    if self.img_connect_if is None:
       return
     self.msg_if.pub_info("Setting image topic to: " + str(topic))
-    self.idx_connect_if.set_selected_topic(topic)
+    self.img_connect_if.set_selected_topic(topic)
     self.publish_status()
 
   def addSourceTopicCb(self, msg):
     self.setImageTopic(msg.data)
 
   def removeSourceTopicCb(self, msg):
-    if msg.data == self.getSelectedTopic(self.idx_connect_if):
+    if msg.data == self.getSelectedTopic(self.img_connect_if):
       self.setImageTopic('None')
 
   def addSourceTopicsCb(self, msg):
     # This app consumes one image at a time, so an array set takes the first
     # entry the connector knows about rather than silently dropping the msg.
     available = []
-    if self.idx_connect_if is not None:
-      available = self.idx_connect_if.get_available_topics()
+    if self.img_connect_if is not None:
+      available = self.img_connect_if.get_available_topics()
     for topic in msg.array:
       if topic in available:
         self.setImageTopic(topic)
@@ -705,7 +706,7 @@ class NepiAutoTurretApp(object):
     self.msg_if.pub_warn("No known image topic in source topics set: " + str(list(msg.array)))
 
   def removeSourceTopicsCb(self, msg):
-    if self.getSelectedTopic(self.idx_connect_if) in msg.array:
+    if self.getSelectedTopic(self.img_connect_if) in msg.array:
       self.setImageTopic('None')
 
   def setAutoSelectEnableCb(self, msg):
@@ -1036,10 +1037,10 @@ class NepiAutoTurretApp(object):
         nepi_interfaces/ProcessStatus: the fully populated sub-message.
     """
     image_connected = self.getImageConnected()
-    selected_image_topic = self.getSelectedTopic(self.idx_connect_if)
+    selected_image_topic = self.getSelectedTopic(self.img_connect_if)
     available_image_topics = []
-    if self.idx_connect_if is not None:
-      available_image_topics = list(self.idx_connect_if.get_available_topics())
+    if self.img_connect_if is not None:
+      available_image_topics = list(self.img_connect_if.get_available_topics())
     selected_sources = []
     if selected_image_topic != 'None':
       selected_sources = [selected_image_topic]
@@ -1137,7 +1138,7 @@ class NepiAutoTurretApp(object):
     # child image publisher node reads it to pick the image it overlays
     # (auto_turret_app_img_pub_node.py:759). Available lists, detector selection
     # and per-source connection state all moved to the connectors' own status.
-    status_msg.selected_image_topic = self.getSelectedTopic(self.idx_connect_if)
+    status_msg.selected_image_topic = self.getSelectedTopic(self.img_connect_if)
 
     status_msg.has_navpose = (navpose_topic != '')
     status_msg.navpose_topic = navpose_topic
@@ -1222,8 +1223,8 @@ class NepiAutoTurretApp(object):
     self.killImgPubNode()
     # ConnectNodeIF.unregister() tears down the connector's subscribers,
     # publishers and node_if registrations; it calls unsubscribe_topic() itself.
-    for name, connect_if in [('detector', self.targets_connect_if),
-                              ('image', self.idx_connect_if),
+    for name, connect_if in [('targets', self.targets_connect_if),
+                              ('image', self.img_connect_if),
                               ('pan tilt', self.ptx_connect_if)]:
       if connect_if is None:
         continue
