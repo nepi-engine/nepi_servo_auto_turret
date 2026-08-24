@@ -33,7 +33,7 @@ import { SliderAdjustment } from "./AdjustmentWidgets"
 
 import NepiIFImageViewer from "./Nepi_IF_ImageViewer"
 import NepiIFConnectPTX from "./Nepi_IF_ConnectPTX"
-import NepiIFConnectIDX from "./Nepi_IF_ConnectIDX"
+import Nepi_IF_Data from "./Nepi_IF_Data"
 import NepiIFConnectTargets from "./Nepi_IF_ConnectTargets"
 import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
@@ -376,8 +376,8 @@ class NepiAppAutoTurret extends Component {
           make_section={false}
         />
 
-        <NepiIFConnectIDX
-          namespace={app_namespace + "/idx_connect"}
+        <Nepi_IF_Data
+          namespace={app_namespace + "/image_connect"}
           title={"Image"}
           show_selector={true}
           show_controls={false}

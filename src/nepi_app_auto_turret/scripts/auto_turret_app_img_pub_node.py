@@ -228,8 +228,7 @@ class AutoTurretImgPub:
 
 
         # Create auto_turret image publisher
-        img_pub_topic = os.path.join(self.node_namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT)
-        self.img_if = ColorImageIF(namespace = img_pub_topic,
+        self.img_if = ColorImageIF(namespace = self.process_namespace,
                         data_product = self.AUTO_TURRET_IMG_DATA_PRODUCT,
                         data_source_description = 'image',
                         data_ref_description = 'image',
@@ -265,12 +264,6 @@ class AutoTurretImgPub:
     ###############################
     # Class Private Methods
     ###############################
-
-    def getImgInfoDict(self):
-        self.img_info_lock.acquire()
-        img_info_dict = copy.deepcopy(self.img_info_dict)
-        self.img_info_lock.release()
-        return img_info_dict
 
 
     def createImgInfoDict(self, source_topic):
@@ -347,19 +340,21 @@ class AutoTurretImgPub:
         self.render_slot_lock.release()
 
     def updaterCb(self, timer):
-        selected_image_topic = copy.deepcopy(self.selected_image_topic)
+        source_topic = copy.deepcopy(self.selected_image_topic)
 
-        # Update Image subscribers
-        source_topic = nepi_sdk.find_topic(selected_image_topic, exact = True)
+        # Update Image subscrif 
+        if source_topic == 'None':
+            source_topic = ''
         if source_topic != '':
             subscribe = False
+            success = True
             if self.img_info_dict is None:
                 subscribe = True
             elif self.img_info_dict['source_topic'] != source_topic:
                 self.msg_if.pub_info('Will unsubscribe from image topic: ' + self.img_info_dict['source_topic'])
-                self.unsubscribeImgTopic()
+                success = self.unsubscribeImgTopic()
                 subscribe = True
-            if subscribe == True:
+            if subscribe == True and success == True:
                 self.msg_if.pub_info('Will subscribe to image topic: ' + source_topic)
                 self.subscribeImgTopic(source_topic)
 
@@ -369,7 +364,7 @@ class AutoTurretImgPub:
             purge_source = True
         if purge_source == True:
             self.msg_if.pub_info('Will unsubscribe from image topic: ' + selected_image_topic)
-            self.unsubscribeImgTopic()
+            success = self.unsubscribeImgTopic()
 
         nepi_sdk.start_timer_process((1), self.updaterCb, oneshot = True)
 
@@ -401,27 +396,16 @@ class AutoTurretImgPub:
     def subscribeImgTopic(self, source_topic):
         if source_topic == "None" or source_topic == "":
             return False
-
-
-
-        img_info_dict = self.getImgInfoDict()
-        if img_info_dict is not None:
-            if img_info_dict['active'] == True:
-                return False
+            
+        if self.img_node_dict is None:
             self.img_node_lock.acquire()
-            if self.img_node_dict is None:
-                self.img_node_dict = dict()
-                self.img_node_dict['img_pub'] = nepi_sdk.create_publisher(img_pub_topic, Image, queue_size = 1, log_name_list = [])
-                nepi_sdk.sleep(1)
-                self.img_node_dict['img_sub'] = nepi_sdk.create_subscriber(source_topic, Image, self.imageCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
-                self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
-                img_status_topic = nepi_sdk.create_namespace(source_topic, 'status')
-                self.img_node_dict['img_status_sub'] = nepi_sdk.create_subscriber(img_status_topic, ImageStatus, self.imageStatusCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
+            self.img_node_dict = dict()
+            self.img_node_dict['img_sub'] = nepi_sdk.create_subscriber(source_topic, Image, self.imageCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
+            self.img_node_dict['img_status_sub'] = nepi_sdk.create_subscriber(source_topic + '/status', ImageStatus, self.imageStatusCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
+            self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
             self.img_node_lock.release()
-            self.img_info_lock.acquire()
-            self.img_info_dict['active'] = True
-            self.img_info_lock.release()
-        else:
+
+        if self.img_info_dict is None:
             self.img_info_lock.acquire()
             self.img_info_dict = self.createImgInfoDict(source_topic)
             self.img_info_lock.release()
@@ -437,19 +421,11 @@ class AutoTurretImgPub:
 
         self.img_node_lock.acquire()
         if self.img_node_dict is not None:
-            if self.img_node_dict['img_sub'] is not None:
-                self.img_node_dict['img_sub'].unregister()
-            if self.img_node_dict['img_status_sub'] is not None:
-                self.img_node_dict['img_status_sub'].unregister()
-            if self.img_node_dict['img_pub'] is not None:
-                self.img_node_dict['img_pub'].unregister()
-            for product in self.SEGMENT_IMG_PRODUCTS:
-                segment_pub = self.img_node_dict.get(product['pub_key'], None)
-                if segment_pub is not None:
-                    segment_pub.unregister()
-                segment_if = self.img_node_dict.get(product['if_key'], None)
-                if segment_if is not None:
-                    segment_if.unregister_pubs()
+            for key in self.img_node_dict.keys():
+                try:
+                    self.img_node_dict[key].unregister()
+                except:
+                    pass
             nepi_sdk.sleep(1)
             self.img_node_dict = None
         
@@ -761,7 +737,7 @@ class AutoTurretImgPub:
         last_sel_imgs = copy.deepcopy(self.selected_image_topic)
         self.selected_image_topic = msg.selected_image_topic
         if last_sel_imgs != self.selected_image_topic:
-            self.msg_if.pub_info("Updating selected images topics: " + str(self.selected_image_topic))
+            self.msg_if.pub_info("Updating selected image topic: " + str(self.selected_image_topic))
 
         self.show_targets_enabled = msg.show_targets_enabled
         self.show_track_enabled = msg.show_track_enabled
@@ -769,12 +745,20 @@ class AutoTurretImgPub:
         self.crosshair_offset_degs = msg.crosshair_offset_degs
 
 
+
+    def getImgInfoDict(self):
+        self.img_info_lock.acquire()
+        img_info_dict = copy.deepcopy(self.img_info_dict)
+        self.img_info_lock.release()
+        return img_info_dict
+
     def shutdownCb(self):
-        for source_topic in list(self.img_info_dict.keys()):
-            try:
-                self.unsubscribeImgTopic(source_topic)
-            except Exception:
-                pass
+        if self.img_info_dict is not None:
+            for source_topic in list(self.img_info_dict.keys()):
+                try:
+                    self.unsubscribeImgTopic(source_topic)
+                except Exception:
+                    pass
 
 
 #########################################

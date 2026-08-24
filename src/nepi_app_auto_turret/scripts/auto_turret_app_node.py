@@ -93,7 +93,7 @@ class NepiAutoTurretApp(object):
 
   pt_connected = False
   image_connected = False
-  detector_connected = False
+  targetor_connected = False
 
   # Pan tilt state
   pt_position = None
@@ -483,7 +483,8 @@ class NepiAutoTurretApp(object):
                     data_products = self.data_products,
                     pub_status = True,
                     factory_rate_dict = factory_data_rates,
-                    msg_if = self.msg_if
+                    msg_if = self.msg_if,
+                    # node_if = self.node_if
                     )
 
     ###############################
@@ -500,15 +501,18 @@ class NepiAutoTurretApp(object):
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
-                                    msg_if = self.msg_if
+                                    msg_if = self.msg_if,
+                                    # node_if = self.node_if
                                     )
 
     self.img_connect_if = ConnectImageIF(
+                                    connect_name = 'image_connect',
                                     filter_topic_list = ['color_image'],
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
-                                    msg_if = self.msg_if
+                                    msg_if = self.msg_if,
+                                    # node_if = self.node_if
                                     )
 
     self.targets_connect_if = ConnectTargetsIF(
@@ -516,7 +520,8 @@ class NepiAutoTurretApp(object):
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
-                                    msg_if = self.msg_if
+                                    msg_if = self.msg_if,
+                                    # node_if = self.node_if
                                     )
 
     for name, connect_if in [('pan tilt', self.ptx_connect_if),
@@ -585,7 +590,7 @@ class NepiAutoTurretApp(object):
     # and re-asserts the stored speed ratios when a pan tilt device connects.
     self.pt_connected = self.checkConnected(self.ptx_connect_if)
     self.image_connected = self.checkConnected(self.img_connect_if)
-    self.detector_connected = self.checkConnected(self.targets_connect_if)
+    self.targetor_connected = self.checkConnected(self.targets_connect_if)
     self.pushSpeedRatios()
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
 
@@ -937,8 +942,8 @@ class NepiAutoTurretApp(object):
   def getImageConnected(self):
     return self.image_connected
 
-  def getDetectorConnected(self):
-    return self.detector_connected
+  def getTargetorConnected(self):
+    return self.targetor_connected
 
   def getNavPoseTopic(self):
     if self.ptx_connect_if is None:
@@ -957,7 +962,7 @@ class NepiAutoTurretApp(object):
     return status_msg.has_adjustable_speed == True
 
   def getTrackingReady(self):
-    return self.pt_connected == True and self.getDetectorConnected() == True
+    return self.pt_connected == True and self.getTargetorConnected() == True
 
   def getStabilizeReady(self):
     navpose_topic = self.getNavPoseTopic()
@@ -1079,7 +1084,7 @@ class NepiAutoTurretApp(object):
     msg.available_source_topics = available_image_topics
     msg.selected_sources = selected_sources
     msg.sources_connected = [image_connected] * len(selected_sources)
-    msg.sources_pub_namespaces = [self.img_pub_topic] * len(selected_sources)
+    msg.sources_pub_namespaces = []
 
     msg.source_selected = (selected_image_topic != 'None')
     msg.source_connected = image_connected
@@ -1091,7 +1096,7 @@ class NepiAutoTurretApp(object):
     msg.use_last_image = True
 
     msg.imaging_source_topics = selected_sources
-    msg.imaging_pub_topics = [self.img_pub_topic] if len(selected_sources) > 0 else []
+    msg.imaging_pub_topics = self.img_pub_topic
 
     msg.avg_source_latency = UNSET_VALUE
     msg.avg_source_rate = UNSET_VALUE
@@ -1136,7 +1141,7 @@ class NepiAutoTurretApp(object):
 
     # The only source field left in this message. It is NOT for the RUI -- the
     # child image publisher node reads it to pick the image it overlays
-    # (auto_turret_app_img_pub_node.py:759). Available lists, detector selection
+    # (auto_turret_app_img_pub_node.py:759). Available lists, targetor selection
     # and per-source connection state all moved to the connectors' own status.
     status_msg.selected_image_topic = self.getSelectedTopic(self.img_connect_if)
 
@@ -1219,19 +1224,8 @@ class NepiAutoTurretApp(object):
   # Node Cleanup
 
   def shutdownCb(self):
-    self.msg_if.pub_info("Shutting down: Executing script cleanup actions")
-    self.killImgPubNode()
-    # ConnectNodeIF.unregister() tears down the connector's subscribers,
-    # publishers and node_if registrations; it calls unsubscribe_topic() itself.
-    for name, connect_if in [('targets', self.targets_connect_if),
-                              ('image', self.img_connect_if),
-                              ('pan tilt', self.ptx_connect_if)]:
-      if connect_if is None:
-        continue
-      try:
-        connect_if.unregister()
-      except Exception as e:
-        self.msg_if.pub_warn("Failed to unregister " + str(name) + " connect IF: " + str(e))
+    print("Shutting down: Executing script cleanup actions")
+
 
 
 #########################################
