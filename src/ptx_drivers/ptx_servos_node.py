@@ -136,9 +136,16 @@ class ServosPTXNode:
                             self.LIMITS_DICT['min_tilt_softstop_deg'],
                             self.LIMITS_DICT['max_tilt_softstop_deg']]
 
+        # auto_select_enabled = False on both axes. Auto-select picks the first
+        # discovered SVX device, and both interfaces discover the same list, so with
+        # it on pan and tilt both land on the same servo channel -- and an operator's
+        # saved channel is overwritten as soon as one axis' choice is discovered a
+        # cycle later than the other's. A pan/tilt pairing is a choice only the
+        # operator can make, so nothing is selected until they make it.
         self.pan_connect_if =  ConnectSVXDeviceIF(connect_name = 'pan_servo',
                 namespace = None,
                 statusCb = None,
+                auto_select_enabled = False,
                 show_selector = True,
                 show_controls = True,
                 show_data = True,
@@ -149,6 +156,7 @@ class ServosPTXNode:
         self.tilt_connect_if =  ConnectSVXDeviceIF(connect_name = 'tilt_servo',
                 namespace = None,
                 statusCb = None,
+                auto_select_enabled = False,
                 show_selector = True,
                 show_controls = True,
                 show_data = True,
@@ -157,8 +165,25 @@ class ServosPTXNode:
         )
 
         ################################################
-        
-    
+
+        # Adopt whatever selection each interface restored from its config file
+        # BEFORE building the cap settings. updateConnectsHandler does not run until
+        # a second after the PTX interface is up, so without this the settings the
+        # PTX interface is constructed with -- and the Discrete options a restored
+        # setting is validated against -- are both still 'None', and SettingsIF.init()
+        # rejects the operator's saved selection as an invalid value on every boot.
+        # The restored topic is added to the options list because it has not been
+        # discovered yet either; updateConnectsHandler replaces both lists with the
+        # discovered ones on its first cycle.
+        self.pan_selected = self.pan_connect_if.get_selected_topic()
+        self.tilt_selected = self.tilt_connect_if.get_selected_topic()
+        self.pan_options = ['None']
+        if self.pan_selected != 'None':
+            self.pan_options.append(self.pan_selected)
+        self.tilt_options = ['None']
+        if self.tilt_selected != 'None':
+            self.tilt_options.append(self.tilt_selected)
+
         # Initialize settings
         cap_settings = self.getCapSettings()
         factory_settings = self.getFactorySettings()
