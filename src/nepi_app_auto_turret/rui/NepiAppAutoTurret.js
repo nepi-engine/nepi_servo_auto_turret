@@ -39,7 +39,7 @@ import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
 
-import { createMenuFirstLastNames } from "./Utilities"
+import { createMenuFirstLastName, createMenuFirstLastNames } from "./Utilities"
 import { setElementStyleModified, clearElementStyleModified } from "./Utilities"
 
 function round(value, decimals = 0) {
@@ -365,14 +365,30 @@ class NepiAppAutoTurret extends Component {
             available list, connection indicator and status readout, published
             as a ConnectIFStatus on its own connect namespace -- see the
             Connect*IF instances in auto_turret_app_node.py. This page only
-            points each component at the right namespace. */}
+            points each component at the right namespace.
 
+            show_data is off on all three on purpose. The connectors still
+            subscribe to their ConnectIFStatus and still drive the selector and
+            the connection indicator; show_data only suppresses the detailed
+            readout child (NepiIFPTXData and friends), which duplicated a full
+            device dashboard -- position, goal, speed, soft and hard limits,
+            home, reverse -- inside this app's side panel. The condensed STATUS
+            block further down is what this page reports instead. Turn one back
+            on only if this page needs that device's full readout. */}
+
+        {/* Controls on, but settings and admin off. NepiIFPTXControls renders
+            the connected device's full Device Settings and Advanced Settings
+            panels alongside the pan/tilt command widgets, and both default to
+            true. Those two are a device dashboard, not app controls, and would
+            put back the clutter the show_data change above removed. */}
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
           title={"Pan Tilt"}
           show_selector={true}
-          show_controls={false}
-          show_data={true}
+          show_controls={true}
+          show_settings={false}
+          show_admin={false}
+          show_data={false}
           make_section={false}
         />
 
@@ -381,7 +397,7 @@ class NepiAppAutoTurret extends Component {
           title={"Image"}
           show_selector={true}
           show_controls={false}
-          show_data={true}
+          show_data={false}
           make_section={false}
         />
 
@@ -390,7 +406,7 @@ class NepiAppAutoTurret extends Component {
           title={"Detector"}
           show_selector={true}
           show_controls={false}
-          show_data={true}
+          show_data={false}
         />
 
         <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
@@ -1073,12 +1089,15 @@ const namespace = this.getNamespace()
     const process_namespace = this.getProcessNamespace()
     const save_data_topic = this.getSaveNamespace()
 
-    const selected_image_topic_topic = this.state.selected_display_topic
-    const img_publishing = imageTopics.indexOf(selected_image_topic_topic) !== -1
+    // 'None' rather than null: 'None' is the sentinel the viewer and the menu
+    // name helpers check for. A null here reached the viewer as a real topic
+    // and threw on the first render, before any status had arrived.
+    const img_pub_topic = (status_msg !== null && status_msg.image_pub_topic) ? status_msg.image_pub_topic : 'None'
 
-    const selected_image_topic = (img_publishing === true && this.state.connected === true) ? selected_image_topic_topic : "None"
-    const selected_image_topic_text = (selected_image_topic_topic === 'None') ? 'No Image Selected' :
-      img_publishing ? this.state.selected_display_text : 'Waiting for image to publish'
+    // Short <source>-<data_product> form, matching the viewer's own default
+    // title and the other apps, instead of the full topic path. Safe on the
+    // 'None' fallback above: the helper returns short strings unchanged.
+    const img_pub_text = createMenuFirstLastName(img_pub_topic)
 
     // status_msg is null until the first status arrives; the toggles render
     // unchecked rather than throwing on a null dereference.
@@ -1176,8 +1195,8 @@ const namespace = this.getNamespace()
                   
 
         <NepiIFImageViewer
-          image_topic={selected_image_topic}
-          title={selected_image_topic_text}
+          image_topic={img_pub_topic}
+          title={img_pub_text}
           show_res_orient={false}
           make_section={false}
           save_data_topic={save_data_topic}
