@@ -346,6 +346,7 @@ class AutoTurretImgPub:
         # Update Image subscrif 
         if source_topic == 'None':
             source_topic = ''
+        success = False
         if source_topic != '':
             subscribe = False
             success = True
@@ -357,14 +358,14 @@ class AutoTurretImgPub:
                 subscribe = True
             if subscribe == True and success == True:
                 self.msg_if.pub_info('Will subscribe to image topic: ' + source_topic)
-                self.subscribeImgTopic(source_topic)
+                success = self.subscribeImgTopic(source_topic)
 
         # Update Image Subs purge list
         purge_source = False
         if self.img_info_dict is not None and source_topic == '':
             purge_source = True
         if purge_source == True:
-            self.msg_if.pub_info('Will unsubscribe from image topic: ' + selected_image_topic)
+            self.msg_if.pub_info('Will unsubscribe from image topic: ' + source_topic)
             success = self.unsubscribeImgTopic()
 
         nepi_sdk.start_timer_process((1), self.updaterCb, oneshot = True)
