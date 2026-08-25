@@ -569,18 +569,8 @@ class AutoTurretImgPub:
         if self.img_if.ready == False:
             return
         else:
-            try:
-                if self.show_crosshair_enabled == True:
-                    [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
-                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Position Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
-                    self.img_if.set_crosshairs_size_ratio(0.4)
-                    self.img_if.set_crosshairs_thickness_ratio(0.4)
-                    self.img_if.set_crosshairs_enable(True)
-                else:
-                    self.img_if.remove_crosshair('Position Goal')
-                    self.img_if.set_crosshairs_enable(False)
-            except Exception as e:
-                self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
+
+
 
             track_dict = copy.deepcopy(self.track_dict)
             if track_dict is not None:
@@ -598,6 +588,21 @@ class AutoTurretImgPub:
                     self.img_if.set_targets_enable(False)
             except Exception as e:
                 self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
+
+
+            try:
+                if self.show_crosshair_enabled == True:
+                    [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
+                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Position Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
+                    self.img_if.set_crosshairs_size_ratio(0.4)
+                    self.img_if.set_crosshairs_thickness_ratio(0.4)
+                    self.img_if.set_crosshairs_enable(True)
+                else:
+                    self.img_if.remove_crosshair('Position Goal')
+                    self.img_if.set_crosshairs_enable(False)
+            except Exception as e:
+                self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
+
 
             self.img_if.publish_cv2_img(cv2_img,
                                 encoding = encoding,

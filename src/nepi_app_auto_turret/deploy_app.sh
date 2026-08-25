@@ -126,8 +126,7 @@ fi
 ###############################################
 # Deploy App Scripts Live
 ###############################################
-SOURCE_PATH=${APP_FOLDER}/scripts
-DEST_PATH=/opt/nepi/nepi_engine/lib/${APP_NAME}
+
 
 RSYNC_EXCLUDES=" --exclude .git --exclude .gitmodules"
 #echo "Excluding ${RSYNC_EXCLUDES}"
@@ -136,6 +135,29 @@ echo ""
 echo "--------------------------------------------"
 echo "DEPLOYING LIVE UPDATES"
 echo ""
+
+SOURCE_PATH=${APP_FOLDER}/scripts
+DEST_PATH=/opt/nepi/nepi_engine/lib/${APP_NAME}
+echo "Syncing App ${APP_NAME} from ${SOURCE_PATH} to NEPI Live Folders at:" 
+echo "Destination Path ${DEST_PATH}"
+echo ""
+rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -o StrictHostKeyChecking=no -p 2222" ${RSYNC_EXCLUDES} ${SOURCE_PATH}/* ${nepi_user_live}@${NEPI_TARGET_IP}:${DEST_PATH}/ 2> /dev/null
+echo ""
+if [[ $? -ne 0 ]]; then
+  if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+    local_host_ip="localhost"
+  elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+    local_host_ip=$NEPI_TARGET_IP
+  fi
+  echo "Failed connect to a running NEPI container on host: ${local_host_ip}"
+  echo "Live Updates Failed"
+else
+  echo "Live Updates Deployed"
+fi
+
+
+SOURCE_PATH=${APP_FOLDER}/rui
+DEST_PATH="${NEPI_BASE}/nepi_rui/src/rui_webserver/rui-app/src"
 echo "Syncing App ${APP_NAME} from ${SOURCE_PATH} to NEPI Live Folders at:" 
 echo "Destination Path ${DEST_PATH}"
 echo ""

@@ -33,7 +33,7 @@ import { SliderAdjustment } from "./AdjustmentWidgets"
 
 import NepiIFImageViewer from "./Nepi_IF_ImageViewer"
 import NepiIFConnectPTX from "./Nepi_IF_ConnectPTX"
-import Nepi_IF_Data from "./Nepi_IF_Data"
+import NepiIFConnectData from "./Nepi_IF_ConnectData"
 import NepiIFConnectTargets from "./Nepi_IF_ConnectTargets"
 import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
@@ -383,18 +383,17 @@ class NepiAppAutoTurret extends Component {
             put back the clutter the show_data change above removed. */}
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
-          title={"Pan Tilt"}
+          select_title={"Pan Tilt"}
           show_selector={true}
-          show_controls={true}
+          show_controls={false}
           show_settings={false}
-          show_admin={false}
           show_data={false}
           make_section={false}
         />
 
-        <Nepi_IF_Data
+        <NepiIFConnectData
           namespace={app_namespace + "/image_connect"}
-          title={"Image"}
+          select_title={"Image"}
           show_selector={true}
           show_controls={false}
           show_data={false}
@@ -403,10 +402,11 @@ class NepiAppAutoTurret extends Component {
 
         <NepiIFConnectTargets
           namespace={app_namespace + "/targets_connect"}
-          title={"Detector"}
+          select_title={"Targeter"}
           show_selector={true}
           show_controls={false}
           show_data={false}
+          make_section={false}
         />
 
         <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
@@ -444,7 +444,7 @@ class NepiAppAutoTurret extends Component {
         </Column>
         </Columns>
 
-        <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+        {/* <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
         <Label title={"STATUS"}></Label>
 
@@ -531,7 +531,7 @@ class NepiAppAutoTurret extends Component {
             namespace={controls_namespace}
             title={"Auto Turret Controls"}
           />
-        : null}
+        : null} */}
 
         <NepiIFConfig
           namespace={this.getAppNamespace()}
@@ -1166,7 +1166,7 @@ const namespace = this.getNamespace()
 
                       <div style={{ width: '10%' }} centered={"true"}>
 
-            <Label title="Show Crosshair">
+            <Label title="Show Goal">
               <AsyncToggle
                 checked={show_crosshair_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_show_crosshair", show_crosshair_enabled === false)}>
@@ -1231,7 +1231,7 @@ const namespace = this.getNamespace()
 
         <div style={{ display: 'flex' }}>
 
-          <div style={{ width: '75%' }}>
+          <div style={{ width: '65%' }}>
 
             {this.renderImageViewer()}
 
@@ -1248,7 +1248,7 @@ const namespace = this.getNamespace()
             {}
           </div>
 
-          <div style={{ width: '23%' }}>
+          <div style={{ width: '33%' }}>
 
             {this.renderApp()}
 
