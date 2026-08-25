@@ -1,6 +1,7 @@
 # This message details the AutoTurret Status Msg
 
 nepi_interfaces/ProcessStatus process_status
+
 string selected_pantilt_topic
 bool pantilt_connected
 nepi_interfaces/DevicePTXStatus pantilt_status_msg
@@ -16,7 +17,7 @@ nepi_interfaces/TargetingStatus targets_status_msg
 
 string selected_navpose_topic
 bool navpose_connected
-nepi_interfaces/NavposeStatus navpose_status_msg
+nepi_interfaces/NavPoseStatus navpose_status_msg
 
 
 
