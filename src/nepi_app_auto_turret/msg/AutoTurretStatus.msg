@@ -22,9 +22,12 @@ nepi_interfaces/TargetingStatus targets_status_msg
 
 string selected_navpose_topic
 bool selected_navpose_connected
-nepi_interfaces/NavposeStatus navpose_status_msg
+nepi_interfaces/NavPoseStatus navpose_status_msg
 
 
+
+bool scanning_ready
+bool scanning_enabled
 
 bool tracking_ready
 bool tracking_enabled

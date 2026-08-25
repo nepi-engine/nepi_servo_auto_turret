@@ -35,6 +35,7 @@ import NepiIFImageViewer from "./Nepi_IF_ImageViewer"
 import NepiIFConnectPTX from "./Nepi_IF_ConnectPTX"
 import NepiIFConnectData from "./Nepi_IF_ConnectData"
 import NepiIFConnectTargets from "./Nepi_IF_ConnectTargets"
+import NepiIFConnectNavPose from "./Nepi_IF_ConnectNavPose"
 import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
@@ -318,7 +319,7 @@ class NepiAppAutoTurret extends Component {
     const avg_process_latency = round(process_status_msg.avg_process_latency, 3)
     const avg_process_rate = round(process_status_msg.avg_process_rate, 3)
 
-    const navpose_connected = status_msg.navpose_topic_connected
+    const navpose_connected = status_msg.selected_navpose_connected
 
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
@@ -375,13 +376,13 @@ class NepiAppAutoTurret extends Component {
 
 
 
-        {/* The three source rows. Each connector owns its own selector,
+        {/* The four source rows. Each connector owns its own selector,
             available list, connection indicator and status readout, published
             as a ConnectIFStatus on its own connect namespace -- see the
             Connect*IF instances in auto_turret_app_node.py. This page only
             points each component at the right namespace.
 
-            show_data is off on all three on purpose. The connectors still
+            show_data is off on all four on purpose. The connectors still
             subscribe to their ConnectIFStatus and still drive the selector and
             the connection indicator; show_data only suppresses the detailed
             readout child (NepiIFPTXData and friends), which duplicated a full
@@ -417,6 +418,21 @@ class NepiAppAutoTurret extends Component {
         <NepiIFConnectTargets
           namespace={app_namespace + "/targets_connect"}
           select_title={"Targeter"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        {/* Fourth source row, same shape as the three above. No select_title
+            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
+            "NavPose Source" and does not read select_title, so passing one
+            would be dead weight. Its default (non-shortened, no connect header)
+            layout is the same selector-plus-Connected-indicator pair the other
+            three rows render, which is why this row carries no BooleanIndicator
+            of its own. */}
+        <NepiIFConnectNavPose
+          namespace={app_namespace + "/navpose_connect"}
           show_selector={true}
           show_controls={false}
           show_data={false}
