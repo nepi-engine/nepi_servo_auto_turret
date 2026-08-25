@@ -19,7 +19,8 @@ string selected_navpose_topic
 bool navpose_connected
 nepi_interfaces/NavPoseStatus navpose_status_msg
 
-
+bool scanning_ready
+bool scanning_enabled
 
 bool tracking_ready
 bool tracking_enabled
