@@ -311,6 +311,11 @@ class NepiAppAutoTurret extends Component {
     const use_last_image = process_status_msg.use_last_image
 
     const auto_select_active = process_status_msg.auto_select_active
+const pantilt_connected = status_msg.pantilt_connected
+const image_connected = status_msg.image_connected
+const targets_connected = status_msg.targets_connected
+const navpose_connected = status_msg.navpose_connected
+
 
     const source_selected = process_status_msg.source_selected
     const source_connected = process_status_msg.source_connected
@@ -318,7 +323,7 @@ class NepiAppAutoTurret extends Component {
     const avg_process_latency = round(process_status_msg.avg_process_latency, 3)
     const avg_process_rate = round(process_status_msg.avg_process_rate, 3)
 
-    const navpose_connected = status_msg.navpose_topic_connected
+    
 
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
@@ -374,27 +379,6 @@ class NepiAppAutoTurret extends Component {
         </Columns>
 
 
-
-        {/* The three source rows. Each connector owns its own selector,
-            available list, connection indicator and status readout, published
-            as a ConnectIFStatus on its own connect namespace -- see the
-            Connect*IF instances in auto_turret_app_node.py. This page only
-            points each component at the right namespace.
-
-            show_data is off on all three on purpose. The connectors still
-            subscribe to their ConnectIFStatus and still drive the selector and
-            the connection indicator; show_data only suppresses the detailed
-            readout child (NepiIFPTXData and friends), which duplicated a full
-            device dashboard -- position, goal, speed, soft and hard limits,
-            home, reverse -- inside this app's side panel. The condensed STATUS
-            block further down is what this page reports instead. Turn one back
-            on only if this page needs that device's full readout. */}
-
-        {/* Controls on, but settings and admin off. NepiIFPTXControls renders
-            the connected device's full Device Settings and Advanced Settings
-            panels alongside the pan/tilt command widgets, and both default to
-            true. Those two are a device dashboard, not app controls, and would
-            put back the clutter the show_data change above removed. */}
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
           select_title={"Pan Tilt"}
@@ -423,44 +407,49 @@ class NepiAppAutoTurret extends Component {
           make_section={false}
         />
 
-        <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-
-        <Columns>
-        <Column>
-
-          <Label title="Enable Scanning">
-            <AsyncToggle
-              disabled={scanning_ready == false}
-              checked={scanning_enabled === true}
-              onClick={() => sendBoolMsg(process_namespace + "/set_scanning_enable", !scanning_enabled)}>
-            </AsyncToggle>
-          </Label>
-
-          <Label title="Enable Tracking">
-            <AsyncToggle
-              disabled={tracking_ready == false}
-              checked={tracking_enabled === true}
-              onClick={() => sendBoolMsg(process_namespace + "/set_tracking_enable", !tracking_enabled)}>
-            </AsyncToggle>
-          </Label>
 
 
-          <Label title="Enable Stabilize">
-            <AsyncToggle
-              disabled={stabilize_ready == false}
-              checked={stabilize_enabled === true}
-              onClick={() => sendBoolMsg(process_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
-            </AsyncToggle>
-          </Label>
+        <div hidden={pantilt_connected === false}>
 
-        </Column>
-        <Column>
-        </Column>
-        </Columns>
+          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
-        
-       
+          <Columns>
+          <Column>
 
+            <Label title="Enable Scanning">
+              <AsyncToggle
+                disabled={scanning_ready == false}
+                checked={scanning_enabled === true}
+                onClick={() => sendBoolMsg(process_namespace + "/set_scanning_enable", !scanning_enabled)}>
+              </AsyncToggle>
+            </Label>
+
+            <Label title="Enable Tracking">
+              <AsyncToggle
+                disabled={tracking_ready == false}
+                checked={tracking_enabled === true}
+                onClick={() => sendBoolMsg(process_namespace + "/set_tracking_enable", !tracking_enabled)}>
+              </AsyncToggle>
+            </Label>
+
+
+            <Label title="Enable Stabilize">
+              <AsyncToggle
+                disabled={stabilize_ready == false}
+                checked={stabilize_enabled === true}
+                onClick={() => sendBoolMsg(process_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
+              </AsyncToggle>
+            </Label>
+
+          </Column>
+          <Column>
+          </Column>
+          </Columns>
+
+          
+          {this.renderPTAuto()}
+
+        </div>
 
         {/* <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 

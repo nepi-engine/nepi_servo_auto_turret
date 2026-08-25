@@ -2,26 +2,20 @@
 
 nepi_interfaces/ProcessStatus process_status
 string selected_pantilt_topic
-bool selected_pantilt_connected
+bool pantilt_connected
 nepi_interfaces/DevicePTXStatus pantilt_status_msg
 
-# Source selection lives on the connect interfaces, not here. Each of
-# <app>/ptx_connect, <app>/idx_connect and <app>/targets_connect publishes its
-# own available list, selection and connection state, and the RUI renders those
-# rows from Nepi_IF_ConnectPTX / Nepi_IF_ConnectIDX / Nepi_IF_ConnectTargets.
-#
-# selected_image_topic stays because it is a parent-to-child contract, not a RUI
-# field: auto_turret_app_img_pub_node.py reads it to pick the image it overlays.
+
 string selected_image_topic
-bool selected_image_connected
+bool image_connected
 nepi_interfaces/ImageStatus image_status_msg
 
 string selected_targets_topic
-bool selected_targets_connected
+bool targets_connected
 nepi_interfaces/TargetingStatus targets_status_msg
 
 string selected_navpose_topic
-bool selected_navpose_connected
+bool navpose_connected
 nepi_interfaces/NavposeStatus navpose_status_msg
 
 
