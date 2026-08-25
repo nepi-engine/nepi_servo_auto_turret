@@ -22,8 +22,11 @@ import threading
 from std_msgs.msg import Empty, String, Bool, Float32
 
 from nepi_interfaces.msg import ControlsStatus
-from nepi_interfaces.msg import DevicePTXStatus, ImageStatus, TargetingStatus, NavPoseStatus
+from nepi_interfaces.msg import DevicePTXStatus
+from nepi_interfaces.msg import ImageStatus
+from nepi_interfaces.msg import NavPoseStatus
 from nepi_interfaces.msg import ProcessStatus
+from nepi_interfaces.msg import TargetingStatus
 from nepi_interfaces.msg import Track
 from nepi_interfaces.msg import FloatArray, StringArray
 
@@ -38,6 +41,7 @@ from nepi_api.node_if import NodeClassIF
 from nepi_api.system_if import SaveDataIF
 from nepi_api.connect_device_if_ptx import ConnectPTXDeviceIF
 from nepi_api.connect_data_if import ConnectImageIF
+from nepi_api.connect_data_if import ConnectNavPoseIF
 from nepi_api.connect_targets_if import ConnectTargetsIF
 
 
@@ -85,8 +89,8 @@ class NepiAutoTurretApp(object):
   # discovery into available_topics, selected_topic with its own persisted param,
   # a select_topic subscriber, check_connection(), and a ConnectIFStatus published
   # on <node>/<connect_name>. The matching RUI components (Nepi_IF_ConnectPTX,
-  # Nepi_IF_ConnectIDX, Nepi_IF_ConnectTargets) render each row off that status,
-  # so this node neither discovers nor selects sources itself.
+  # Nepi_IF_ConnectIDX, Nepi_IF_ConnectTargets, Nepi_IF_ConnectNavPose) render each
+  # row off that status, so this node neither discovers nor selects sources itself.
   pantilt_connect_if = None
   image_connect_if = None
   targets_connect_if = None
@@ -147,6 +151,17 @@ class NepiAutoTurretApp(object):
     ##############################
     # Initialize Class Variables
     self.tracking_dict = copy.deepcopy(nepi_track.BLANK_SETTINGS_DICT)
+
+    # Every connector is seeded here, before node_if setup, because
+    # initCb(do_updates = True) below publishes a status during construction --
+    # get_status_msg() reads all four connectors and would raise on a missing
+    # attribute long before the connectors themselves are built at the bottom of
+    # this method. The class attributes above already cover a connector whose
+    # constructor raises; these assignments make the ordering contract explicit.
+    self.pantilt_connect_if = None
+    self.image_connect_if = None
+    self.targets_connect_if = None
+    self.navpose_connect_if = None
 
     # The image publisher node recovers this namespace by stripping the suffix
     # from its own, so the child node name is load-bearing, not cosmetic.
@@ -530,9 +545,26 @@ class NepiAutoTurretApp(object):
                                     # node_if = self.node_if
                                     )
 
+    # connect_data = False for the same reason as the image connector: this node
+    # reports the selected navpose source and its status, and nothing here
+    # consumes NavPose messages, so there is no reason to subscribe to the data
+    # topic. The status subscriber is created either way, which is what
+    # check_connection() and get_status_msg() report from.
+    self.navpose_connect_if = ConnectNavPoseIF(
+                                    connect_name = 'navpose_connect',
+                                    auto_select_enabled = self.auto_select_enabled,
+                                    connect_data = False,
+                                    show_selector = True,
+                                    show_controls = False,
+                                    show_data = False,
+                                    msg_if = self.msg_if,
+                                    # node_if = self.node_if
+                                    )
+
     for name, connect_if in [('pan tilt', self.pantilt_connect_if),
                               ('image', self.image_connect_if),
-                              ('targets', self.targets_connect_if)]:
+                              ('targets', self.targets_connect_if),
+                              ('navpose', self.navpose_connect_if)]:
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
 
@@ -1144,9 +1176,15 @@ class NepiAutoTurretApp(object):
     status_msg.process_status = self.get_process_status_msg()
 
 
+    # Each connect IF is None until its source is selected, so the local has to
+    # be seeded before the guard and the empty fallback has to be the field's
+    # own type -- a DevicePTXStatus in the image/targets/navpose slots fails
+    # serialization on publish. The connected flags come from the cached
+    # self.*_connected sampled in updaterCb, not from a check_connection() call
+    # on the status path.
     pantilt_status_msg = None
     if self.pantilt_connect_if is not None:
-      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
+      self.pantilt_connect_if.set_auto_connect_enable(self.auto_select_enabled)
       status_msg.selected_pantilt_topic = self.pantilt_connect_if.get_namespace()
       pantilt_status_msg = self.pantilt_connect_if.get_status_msg()
     if pantilt_status_msg is None:
@@ -1157,7 +1195,7 @@ class NepiAutoTurretApp(object):
 
     image_status_msg = None
     if self.image_connect_if is not None:
-      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
+      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled)
       status_msg.selected_image_topic = self.image_connect_if.get_namespace()
       image_status_msg = self.image_connect_if.get_status_msg()
     if image_status_msg is None:
@@ -1168,18 +1206,18 @@ class NepiAutoTurretApp(object):
 
     targets_status_msg = None
     if self.targets_connect_if is not None:
-      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
+      self.targets_connect_if.set_auto_connect_enable(self.auto_select_enabled)
       status_msg.selected_targets_topic = self.targets_connect_if.get_namespace()
       targets_status_msg = self.targets_connect_if.get_status_msg()
     if targets_status_msg is None:
       status_msg.selected_targets_topic = "None"
-      targets_status_msg =TargetingStatus()
+      targets_status_msg = TargetingStatus()
     status_msg.targets_connected = self.targets_connected
     status_msg.targets_status_msg = targets_status_msg
 
     navpose_status_msg = None
     if self.navpose_connect_if is not None:
-      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
+      self.navpose_connect_if.set_auto_connect_enable(self.auto_select_enabled)
       status_msg.selected_navpose_topic = self.navpose_connect_if.get_namespace()
       navpose_status_msg = self.navpose_connect_if.get_status_msg()
     if navpose_status_msg is None:

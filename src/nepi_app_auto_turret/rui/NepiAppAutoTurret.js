@@ -35,6 +35,7 @@ import NepiIFImageViewer from "./Nepi_IF_ImageViewer"
 import NepiIFConnectPTX from "./Nepi_IF_ConnectPTX"
 import NepiIFConnectData from "./Nepi_IF_ConnectData"
 import NepiIFConnectTargets from "./Nepi_IF_ConnectTargets"
+import NepiIFConnectNavPose from "./Nepi_IF_ConnectNavPose"
 import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
@@ -323,7 +324,6 @@ const navpose_connected = status_msg.navpose_connected
     const avg_process_latency = round(process_status_msg.avg_process_latency, 3)
     const avg_process_rate = round(process_status_msg.avg_process_rate, 3)
 
-    
 
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
@@ -379,6 +379,27 @@ const navpose_connected = status_msg.navpose_connected
         </Columns>
 
 
+
+        {/* The four source rows. Each connector owns its own selector,
+            available list, connection indicator and status readout, published
+            as a ConnectIFStatus on its own connect namespace -- see the
+            Connect*IF instances in auto_turret_app_node.py. This page only
+            points each component at the right namespace.
+
+            show_data is off on all four on purpose. The connectors still
+            subscribe to their ConnectIFStatus and still drive the selector and
+            the connection indicator; show_data only suppresses the detailed
+            readout child (NepiIFPTXData and friends), which duplicated a full
+            device dashboard -- position, goal, speed, soft and hard limits,
+            home, reverse -- inside this app's side panel. The condensed STATUS
+            block further down is what this page reports instead. Turn one back
+            on only if this page needs that device's full readout. */}
+
+        {/* Controls on, but settings and admin off. NepiIFPTXControls renders
+            the connected device's full Device Settings and Advanced Settings
+            panels alongside the pan/tilt command widgets, and both default to
+            true. Those two are a device dashboard, not app controls, and would
+            put back the clutter the show_data change above removed. */}
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
           select_title={"Pan Tilt"}
@@ -407,6 +428,20 @@ const navpose_connected = status_msg.navpose_connected
           make_section={false}
         />
 
+        {/* Fourth source row, same shape as the three above. No select_title
+            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
+            "NavPose Source" and does not read select_title, so passing one
+            would be dead weight. Its default (non-shortened, no connect header)
+            layout is the same selector-plus-Connected-indicator pair the other
+            three rows render, which is why this row carries no BooleanIndicator
+            of its own. */}
+        <NepiIFConnectNavPose
+          namespace={app_namespace + "/navpose_connect"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
 
 
         <div hidden={pantilt_connected === false}>
