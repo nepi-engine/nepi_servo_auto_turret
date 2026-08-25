@@ -22,7 +22,7 @@ import threading
 from std_msgs.msg import Empty, String, Bool, Float32
 
 from nepi_interfaces.msg import ControlsStatus
-from nepi_interfaces.msg import DevicePTXStatus
+from nepi_interfaces.msg import DevicePTXStatus, ImageStatus, TargetingStatus, NavPoseStatus
 from nepi_interfaces.msg import ProcessStatus
 from nepi_interfaces.msg import Track
 from nepi_interfaces.msg import FloatArray, StringArray
@@ -1162,7 +1162,7 @@ class NepiAutoTurretApp(object):
       image_status_msg = self.image_connect_if.get_status_msg()
     if image_status_msg is None:
       status_msg.selected_image_topic = "None"
-      image_status_msg = DevicePTXStatus()
+      image_status_msg = ImageStatus()
     status_msg.image_connected = self.image_connected
     status_msg.image_status_msg = image_status_msg
 
@@ -1173,7 +1173,7 @@ class NepiAutoTurretApp(object):
       targets_status_msg = self.targets_connect_if.get_status_msg()
     if targets_status_msg is None:
       status_msg.selected_targets_topic = "None"
-      targets_status_msg = DevicePTXStatus()
+      targets_status_msg =TargetingStatus()
     status_msg.targets_connected = self.targets_connected
     status_msg.targets_status_msg = targets_status_msg
 
@@ -1184,7 +1184,7 @@ class NepiAutoTurretApp(object):
       navpose_status_msg = self.navpose_connect_if.get_status_msg()
     if navpose_status_msg is None:
       status_msg.selected_navpose_topic = "None"
-      navpose_status_msg = DevicePTXStatus()
+      navpose_status_msg = NavPoseStatus()
     status_msg.navpose_connected = self.navpose_connected
     status_msg.navpose_status_msg = navpose_status_msg
 
