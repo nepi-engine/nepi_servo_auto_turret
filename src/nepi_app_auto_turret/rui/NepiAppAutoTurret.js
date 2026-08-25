@@ -79,6 +79,13 @@ class NepiAppAutoTurret extends Component {
       selected_display_topic: "None",
       selected_display_text: "None",
 
+      // Manual GoTo entry values and the auto-mode ownership they were seeded
+      // against; maintained by statusListener, read by renderPTControls.
+      panGoto: null,
+      tiltGoto: null,
+      panDisabled: null,
+      tiltDisabled: null,
+
       statusListener: null,
       needs_update: false
     }
@@ -161,9 +168,26 @@ class NepiAppAutoTurret extends Component {
 
   // Callback for handling ROS Status messages
   statusListener(message) {
+    // Seed the manual GoTo entries from the device's reported goal, and reseed
+    // whenever an auto mode takes or releases an axis so a stale hand-typed
+    // value is never left in the box. This belongs here and not in
+    // renderPTControls: a setState from inside render loops.
+    const pantilt_status_msg = message.pantilt_status_msg
+    const pan_disabled = (message.pan_control_disabled === true)
+    const tilt_disabled = (message.tilt_control_disabled === true)
+    if (pantilt_status_msg != null) {
+      if (this.state.panGoto == null || pan_disabled !== this.state.panDisabled) {
+        this.setState({ panGoto: pantilt_status_msg.pan_goal_deg + .001 })
+      }
+      if (this.state.tiltGoto == null || tilt_disabled !== this.state.tiltDisabled) {
+        this.setState({ tiltGoto: pantilt_status_msg.tilt_goal_deg + .001 })
+      }
+    }
     this.setState({
       status_msg: message,
       process_status_msg: message.process_status,
+      panDisabled: pan_disabled,
+      tiltDisabled: tilt_disabled,
       connected: true
     })
   }
@@ -613,44 +637,34 @@ const navpose_connected = status_msg.navpose_connected
 
   }
 
+  // Drives the GoTo Position inputs in renderPTControls, which are commented
+  // out. Kept working so re-enabling them is a one-block change: each axis
+  // publishes its own degree command to the app, which gates and forwards.
   onPTKeyText(e) {
-    const {ptxDevices, onSetPTXGotoPos, onSetPTXGotoPanPos, onSetPTXGotoTiltPos, onSetPTXHomePos, onSetPTXSoftStopPos} = this.props.ros
- const {sendFloatMsg} = this.props.ros
-const namespace = this.getNamespace()
-    const selected_pan_tilt = this.state.selected_pan_tilt
-    const ptx_caps = ptxDevices[selected_pan_tilt]
-    const has_timed_pos = ptx_caps && (ptx_caps.has_timed_positioning)
-    const has_sep_pan_tilt = ptx_caps && (ptx_caps.has_seperate_pan_tilt_control)
-    const has_abs_pos = ptx_caps && (ptx_caps.has_absolute_positioning === true)
-    const has_homing = ptx_caps && (ptx_caps.has_homing)
-    const has_speed_control = ptx_caps && (ptx_caps.has_adjustable_speed)
-    const has_sep_speed = ptx_caps && (ptx_caps.has_seperate_pan_tilt_speed === true)
-    //Unused const has_set_home = ptx_caps && (ptx_caps.has_set_home)
+    const { sendFloatMsg } = this.props.ros
+    const namespace = this.getProcessNamespace()
+    if (namespace == null) {
+      return
+    }
 
     var panElement = null
     var tiltElement = null
     if(e.key === 'Enter'){
-      if (e.target.id === "PTXPanGoto") 
+      if (e.target.id === "PTXPanGoto")
         {
           panElement = document.getElementById("PTXPanGoto")
-          tiltElement = document.getElementById("PTXTiltGoto")                    
-          sendFloatMsg(namespace + '/set_pan_pos_deg', Number(panElement.value),Number(tiltElement.value))   
-          clearElementStyleModified(panElement)   
-          this.setState({panGoto: null})    
-          
+          sendFloatMsg(namespace + '/set_pan_pos_deg', Number(panElement.value))
+          clearElementStyleModified(panElement)
+          this.setState({panGoto: null})
+
         }
         else if  (e.target.id === "PTXTiltGoto")
           {
-            
-            panElement = document.getElementById("PTXPanGoto")
             tiltElement = document.getElementById("PTXTiltGoto")
-
-
-              sendFloatMsg(namespace + '/set_tilt_pos_deg', Number(tiltElement.value))
-          
+            sendFloatMsg(namespace + '/set_tilt_pos_deg', Number(tiltElement.value))
             clearElementStyleModified(tiltElement)
-            this.setState({tiltGoto: null})      
-          
+            this.setState({tiltGoto: null})
+
           }
     }
   }
@@ -658,34 +672,44 @@ const namespace = this.getNamespace()
 
 
 
+  // Manual pan tilt block, rendered under the auto mode enables. Gated on the
+  // app's own status, not on the ros store's ptxDevices list: this page talks
+  // only to the app, so what matters is whether the app reports a connected
+  // device -- the RUI's own device discovery is irrelevant here.
+  //
+  // The scan/track/stabilize toggles that used to live in this method are gone.
+  // They were the source app's copies, publishing to set_scan_enable /
+  // set_track_enable / set_stab_enable, none of which this node subscribes to
+  // (the live topics are set_scanning_enable / set_tracking_enable /
+  // set_stabilize_enable, already rendered by renderAppSettings above).
   renderPTAuto() {
-    const { ptxDevices, sendBoolMsg } = this.props.ros
-
-    const { scanPanEnabled, scanTiltEnabled, trackPanEnabled, trackTiltEnabled,
-            track_source_connected, stabPanEnabled, stabTiltEnabled,
-            click_pan_enabled, click_tilt_enabled  } = this.state /*sinPanEnabled ,sinTiltEnabled*/
-
-    const selected_pan_tilt = this.state.selected_pan_tilt
-
-    //Unused const {sendTriggerMsg} = this.props.ros
-
-    const namespace = this.getNamespace()
-
     const status_msg = this.state.status_msg
-    const topics = Object.keys(ptxDevices)
-    const pt_connected_topics = []
-    var i
-    for (i = 0; i <topics.length; i++) {
-    if (topics[i].includes(selected_pan_tilt)){
-      pt_connected_topics.push(topics[i])
+
+    if (status_msg == null || status_msg.pantilt_connected !== true) {
+      return (
+        <Columns>
+        <Column>
+        </Column>
+        </Columns>
+      )
     }
+
+    return this.renderPTControls()
   }
-    
-    const pt_connected = (pt_connected_topics.indexOf(selected_pan_tilt) !== -1)
-    //console.log('pt_connected: ' + pt_connected)
 
 
-    if (status_msg == null || pt_connected == false){
+
+
+  // Condensed pan tilt readout and speed controls for the connected device.
+  // Every field below is read off the app's own status: the device dashboard
+  // fields come through status_msg.pantilt_status_msg, which the node fills
+  // from the connector, and the ratios the app itself owns come off the top
+  // level. Nothing here reads the ros store's ptxDevices.
+  renderPTControls() {
+    const status_msg = this.state.status_msg
+    const namespace = this.getProcessNamespace()
+
+    if (status_msg == null || status_msg.pantilt_connected !== true || namespace == null){
       return(
 
         <Columns>
@@ -699,249 +723,36 @@ const namespace = this.getNamespace()
     }
     else {
 
+    const pantilt_status_msg = status_msg.pantilt_status_msg
 
-    const has_scan_pan = (status_msg.pantilt_status_msg.has_scan_pan)
-    const has_scan_tilt = (status_msg.pantilt_status_msg.has_scan_tilt)
-    const has_abs_pos = (status_msg.pantilt_status_msg.has_absolute_positioning)
-    const has_homing = (status_msg.pantilt_status_msg.has_homing)
-    const has_speed_control = (status_msg.pantilt_status_msg.has_adjustable_speed)
-    const has_sep_speed = (status_msg.pantilt_status_msg.has_seperate_pan_tilt_speed)
+    const has_abs_pos = (pantilt_status_msg.has_absolute_positioning === true)
+    const has_homing = (pantilt_status_msg.has_homing === true)
+    const has_speed_control = (pantilt_status_msg.has_adjustable_speed === true)
 
-    const disable_track_enable = ((track_source_connected === false || has_scan_pan === false || has_scan_tilt === false))
+      const panPositionClean = pantilt_status_msg.pan_now_deg + .001
+      const tiltPositionClean = pantilt_status_msg.tilt_now_deg + .001
 
-    const disable_stab_enable = false
-
-
-      const scanEnabled = status_msg.scan_enabled
-      const trackEnabled = status_msg.track_enabled
-      const stabEnabled = status_msg.stab_enabled
-
+      // The node refuses a position command while any auto mode holds the axis.
       const pan_control_disabled = (status_msg.pan_control_disabled === true)
       const tilt_control_disabled = (status_msg.tilt_control_disabled === true)
-      const speedRatio = status_msg.speed_ratio
+
+      // Editable values for the (commented out) GoTo inputs. They live in state
+      // so typing can hold; statusListener seeds and reseeds them, because a
+      // setState from inside render loops.
+      const pan_pos = this.state.panGoto
+      const tilt_pos = this.state.tiltGoto
+
+      const panCurSpeedClean = pantilt_status_msg.speed_pan_dps + .001
+      const tiltCurSpeedClean = pantilt_status_msg.speed_tilt_dps + .001
+
+      // The app's own stored ratios, which it pushes to the device on connect.
       const speedPanRatio = status_msg.pan_speed_ratio
       const speedTiltRatio = status_msg.tilt_speed_ratio
 
-
-      const show_control = this.state.show_control
-        return (
-          <React.Fragment>
-
-
-
-          {/* { (has_homing === false) ?
-
-
-          <ButtonMenu>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pt_stop')}>{"STOP"}</Button>
-          </ButtonMenu>
-
-          :
-
-          <ButtonMenu>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pt_stop')}>{"STOP"}</Button>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pan_home')}>{"PAN HOME"}</Button>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/tilt_home')}>{"TILT HOME"}</Button>
-          </ButtonMenu>
-
-          } */}
-
-
-
-
-              <Label title={"Stabilize"}>
-
-
-                <div style={{ display: "inline-block", width: "45%", float: "left" }} >
-
-                      <AsyncToggle style={{justifyContent: "flex-left"}} 
-                        disabled={this.state.stabPanReady === false}
-                        checked={stabEnabled === true} 
-                        onClick={() => sendBoolMsg.bind(this)(namespace + "/set_stab_enable",!stabEnabled)} />
-                  
-                </div>
-{/* 
-                <div style={{ display: "inline-block", width: "45%", float: "left" }} >
-                  <div hidden={this.state.stabPanReady === false}>
-                      <Toggle style={{justifyContent: "flex-left"}} 
-                        checked={stabPanEnabled === true} 
-                        onClick={() => sendBoolMsg.bind(this)(namespace + "/set_stab_pan_enable",!stabPanEnabled)} />
-                  </div>
-                </div>
-
-
-                <div style={{ display: "inline-block", width: "45%", float: "right" }}>
-                  <div hidden={this.state.stabTiltReady === false}>
-                    <Toggle style={{justifyContent: "flex-right"}} 
-                      checked={stabTiltEnabled === true} 
-                      onClick={() => sendBoolMsg.bind(this)(namespace + "/set_stab_tilt_enable",!stabTiltEnabled)} />
-                  </div>
-                </div> */}
-
-              </Label>
-
-
-            <Label title={"Sweep"}>
-
-              <div style={{ display: "inline-block", width: "45%", float: "left" }}>
-                <AsyncToggle style={{justifyContent: "flex-left"}} 
-                  checked={scanEnabled} 
-                  onClick={() => sendBoolMsg.bind(this)(namespace + "/set_scan_enable",!scanEnabled)} />
-              </div>
-
-              {/* <div style={{ display: "inline-block", width: "45%", float: "left" }}>
-                <Toggle style={{justifyContent: "flex-left"}} 
-                  checked={scanPanEnabled} 
-                  onClick={() => sendBoolMsg.bind(this)(namespace + "/set_scan_pan_enable",!scanPanEnabled)} />
-              </div>
-
-
-              <div style={{ display: "inline-block", width: "45%", float: "right" }}>
-                <Toggle style={{justifyContent: "flex-right"}} 
-                  checked={scanTiltEnabled} 
-                  onClick={() => sendBoolMsg.bind(this)(namespace + "/set_scan_tilt_enable",!scanTiltEnabled)} />
-              </div> */}
-
-            </Label>
-
-
-              <Label title={"AI Tracking"}>
-
-
-                <div style={{ display: "inline-block", width: "45%", float: "left" }}>
-                  <AsyncToggle style={{justifyContent: "flex-left"}} 
-                    disabled={disable_track_enable === true}
-                    checked={trackEnabled === true && disable_track_enable === false} 
-                    onClick={() => sendBoolMsg.bind(this)(namespace + "/set_track_enable",!trackEnabled)} />
-                </div>
-
-                {/* <div style={{ display: "inline-block", width: "45%", float: "left" }}>
-                  <Toggle style={{justifyContent: "flex-left"}} 
-                    disabled={disable_track_enable === true}
-                    checked={trackPanEnabled === true && disable_track_enable === false} 
-                    onClick={() => sendBoolMsg.bind(this)(namespace + "/set_track_pan_enable",!trackPanEnabled)} />
-                </div>
-
-
-                <div style={{ display: "inline-block", width: "45%", float: "right" }}>
-                  <Toggle style={{justifyContent: "flex-right"}} 
-                    disabled={disable_track_enable === true}
-                    checked={trackTiltEnabled === true && disable_track_enable === false} 
-                    onClick={() => sendBoolMsg.bind(this)(namespace + "/set_track_tilt_enable",!trackTiltEnabled)} />
-                </div> */}
-
-              </Label>
-
-
-
-            {this.renderPTControls()}
-
-            </React.Fragment>
-        )
-  }
-}
-
-
-
-
-  renderPTControls() {
-    const { ptxDevices} = this.props.ros
-
-    const { scanPanEnabled, scanTiltEnabled, trackPanEnabled, trackTiltEnabled,
-            track_source_connected, stabPanEnabled, stabTiltEnabled,
-            click_pan_enabled, click_tilt_enabled  } = this.state /*sinPanEnabled ,sinTiltEnabled*/
-
-    const selected_pan_tilt = this.state.selected_pan_tilt
-
-    //Unused const {sendTriggerMsg} = this.props.ros
-
-    const namespace = this.getNamespace()
-
-    const status_msg = this.state.status_msg
-    const topics = Object.keys(ptxDevices)
-    const pt_connected_topics = []
-    var i
-    for (i = 0; i <topics.length; i++) {
-    if (topics[i].includes(selected_pan_tilt)){
-      pt_connected_topics.push(topics[i])
-    }
-  }
-    
-    const pt_connected = (pt_connected_topics.indexOf(selected_pan_tilt) !== -1)
-    //console.log('pt_connected: ' + pt_connected)
-
-
-    if (status_msg == null || pt_connected == false){
-      return(
-
-        <Columns>
-        <Column>
-
-        </Column>
-        </Columns>
-
-      )
-
-    }
-    else {
-
-
-    const has_scan_pan = (status_msg.pantilt_status_msg.has_scan_pan)
-    const has_scan_tilt = (status_msg.pantilt_status_msg.has_scan_tilt)
-    const has_abs_pos = (status_msg.pantilt_status_msg.has_absolute_positioning)
-    const has_homing = (status_msg.pantilt_status_msg.has_homing)
-    const has_speed_control = (status_msg.pantilt_status_msg.has_adjustable_speed)
-    const has_sep_speed = (status_msg.pantilt_status_msg.has_seperate_pan_tilt_speed)
-
-    const disable_track_enable = ((track_source_connected === false || has_scan_pan === false || has_scan_tilt === false))
-
-    const disable_stab_enable = false
-
-      const panPosition = status_msg.pantilt_status_msg.pan_now_deg
-      const tiltPosition = status_msg.pantilt_status_msg.tilt_now_deg
-
-      const panPositionClean = panPosition + .001
-      const tiltPositionClean = tiltPosition + .001
-
-      if (this.state.panGoto == null){
-        this.setState({panGoto: panPositionClean})
-      }
-
-      if (this.state.tiltGoto == null){
-        this.setState({tiltGoto: tiltPositionClean})
-      }
-
-      const panMove = status_msg.pantilt_status_msg.pan_goal_deg
-      const tiltMove = status_msg.pantilt_status_msg.tilt_goal_deg
-
-      const panMoveClean = panMove + .001
-      const tiltMoveClean = tiltMove + .001
-
-      const pan_control_disabled = (status_msg.auto_pan_pos_disabled === true)
-      
-      if (pan_control_disabled !== this.state.panDisabled){
-        this.setState({panGoto: panMoveClean, panDisabled: pan_control_disabled})
-      }
-      const pan_pos = this.state.panGoto //pan_control_disabled === true ? panMoveClean : this.state.panGoto
-
-      const tilt_control_disabled = (status_msg.auto_tilt_pos_disabled === true)
-      if (tilt_control_disabled !== this.state.tiltDisabled){
-        this.setState({tiltGoto: tiltMoveClean, tiltDisabled: tilt_control_disabled})
-      }      
-      const tilt_pos = this.state.tiltGoto //tilt_control_disabled === true ? tiltMoveClean : this.state.tiltGoto
-
-
-      const panCurSpeed = status_msg.pantilt_status_msg.speed_pan_dps
-      const tiltCurSpeed = status_msg.pantilt_status_msg.speed_tilt_dps
-
-      const panCurSpeedClean = panCurSpeed + .001
-      const tiltCurSpeedClean = tiltCurSpeed + .001
-
-      const speedRatio = status_msg.speed_ratio
-      const speedPanRatio = status_msg.auto_pan_speed_ratio_set
-      const speedTiltRatio = status_msg.auto_tilt_speed_ratio_set
-
-      const maxSpeed = status_msg.pan_tilt_max_speed_dps
+      // pan_tilt_max_speed_dps is UNSET_VALUE (-999) until the app has a
+      // connected device to ask, which would render a negative dps readout;
+      // fall back to what the device reports for itself.
+      const maxSpeed = (status_msg.pan_tilt_max_speed_dps > 0) ? status_msg.pan_tilt_max_speed_dps : pantilt_status_msg.speed_max_dps
       const panSetSpeed = speedPanRatio * maxSpeed
       const tiltSetSpeed = speedTiltRatio * maxSpeed
 
@@ -956,11 +767,20 @@ const namespace = this.getNamespace()
             <div style={{ display: "inline-block", width: "45%", float: "left" }}>{"Tilt"}</div>
           </Label>
 
-          <ButtonMenu>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pt_stop')}>{"STOP"}</Button>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pan_home')}>{"HOME"}</Button>
-            <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/tilt_home')}>{"HOME"}</Button>
-          </ButtonMenu>
+          {/* STOP always; the two HOME buttons only for a device that homes.
+              All three are Empty triggers on the app, matching pt_stop /
+              pan_home / tilt_home in the node's subscriber dict. */}
+          {(has_homing === true) ?
+            <ButtonMenu>
+              <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pt_stop')}>{"STOP"}</Button>
+              <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pan_home')}>{"HOME"}</Button>
+              <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/tilt_home')}>{"HOME"}</Button>
+            </ButtonMenu>
+          :
+            <ButtonMenu>
+              <Button onClick={() => this.props.ros.sendTriggerMsg(namespace + '/pt_stop')}>{"STOP"}</Button>
+            </ButtonMenu>
+          }
 
           <div hidden={(has_abs_pos === false)}>
 
@@ -1018,9 +838,16 @@ const namespace = this.getNamespace()
 
           <div hidden={(has_speed_control === false)}>
 
+              {/* Speed is never gated on an auto mode: the app stores both
+                  ratios as params and re-pushes them to the device on connect,
+                  so setting speed while scanning or tracking is legitimate and
+                  the node's setPanSpeedRatioCb accepts it. (The source app
+                  gated these on auto_pan_position_disabled, a field that does
+                  not exist in AutoTurretStatus, so the guard read undefined and
+                  never fired anyway.) */}
               <React.Fragment>
                 <SliderAdjustment
-                  disabled={status_msg.auto_pan_position_disabled}
+                  disabled={false}
                   title={"Pan Speed"}
                   msgType={"std_msgs/Float32"}
                   adjustment={speedPanRatio}
@@ -1033,7 +860,7 @@ const namespace = this.getNamespace()
                   unit={""}
                 />
                 <SliderAdjustment
-                  disabled={status_msg.auto_tilt_position_disabled}
+                  disabled={false}
                   title={"Tilt Speed"}
                   msgType={"std_msgs/Float32"}
                   adjustment={speedTiltRatio}
@@ -1147,6 +974,36 @@ const namespace = this.getNamespace()
     const show_targets_enabled = (status_msg !== null) ? status_msg.show_targets_enabled : false
     const show_track_enabled = (status_msg !== null) ? status_msg.show_track_enabled : false
     const show_crosshair_enabled = (status_msg !== null) ? status_msg.show_crosshair_enabled : false
+
+    // Manual pan/tilt drive for the flanking sliders. Both values come from the
+    // connected device's reported goal ratio, so a move commanded from anywhere
+    // -- this page, another page, or an auto mode -- walks the handles.
+    const pantilt_status_msg = (status_msg !== null) ? status_msg.pantilt_status_msg : null
+    const pantilt_connected = (status_msg !== null) ? status_msg.pantilt_connected : false
+    const has_abs_pos = (pantilt_status_msg != null) ? (pantilt_status_msg.has_absolute_positioning === true) : false
+    const pan_goal_ratio = (pantilt_status_msg != null) ? pantilt_status_msg.pan_goal_ratio : 0.5
+    const tilt_goal_ratio = (pantilt_status_msg != null) ? pantilt_status_msg.tilt_goal_ratio : 0.5
+
+    // The node rejects a position command while any auto mode holds the axis
+    // (getPanControlDisabled), so the sliders grey out rather than publishing
+    // into a warning.
+    const pan_slider_disabled = (status_msg !== null) ? (status_msg.pan_control_disabled === true) : true
+    const tilt_slider_disabled = (status_msg !== null) ? (status_msg.tilt_control_disabled === true) : true
+
+    // Ratio, not degrees: the app node owns the ratio-to-travel mapping and the
+    // gating -- see set_pan_pos_ratio in auto_turret_app_node.py. This page
+    // never publishes to the pan tilt device's own namespace.
+    const pan_slider_topic = (process_namespace != null) ? process_namespace + "/set_pan_pos_ratio" : "None"
+    const tilt_slider_topic = (process_namespace != null) ? process_namespace + "/set_tilt_pos_ratio" : "None"
+
+    // Match the tilt slider to the rendered viewer height. offsetHeight is read
+    // off the previous paint, so the first render has no element yet and comes
+    // back 1; the sliders stay hidden until a real height exists, which the next
+    // status update (1 Hz) triggers.
+    const viewerElement = document.getElementById("autoTurretImageViewer")
+    const tiltSliderHeight = (viewerElement) ? Math.floor(viewerElement.offsetHeight * 1.0) : 1
+    const show_pt_sliders = (tiltSliderHeight === 1) ? false : (pantilt_connected === true && has_abs_pos === true)
+
     return (
            <Section>
 
@@ -1234,15 +1091,66 @@ const namespace = this.getNamespace()
 
 
         <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-                  
 
-        <NepiIFImageViewer
-          image_topic={img_pub_topic}
-          title={img_pub_text}
-          show_res_orient={false}
-          make_section={false}
-          save_data_topic={save_data_topic}
-        />
+
+        <Columns>
+        <Column equalWidth={false}>
+
+          <div id="autoTurretImageViewer">
+            <NepiIFImageViewer
+              image_topic={img_pub_topic}
+              title={img_pub_text}
+              show_res_orient={false}
+              make_section={false}
+              save_data_topic={save_data_topic}
+            />
+          </div>
+
+          <div hidden={show_pt_sliders === false}>
+
+            <SliderAdjustment
+              title={"Pan"}
+              msgType={"std_msgs/Float32"}
+              adjustment={pan_goal_ratio}
+              disabled={pan_slider_disabled === true}
+              topic={pan_slider_topic}
+              scaled={0.01}
+              min={0}
+              max={100}
+              tooltip={"Pan as a percentage (0%=min, 100%=max)"}
+              unit={"%"}
+              noTextBox={true}
+              noLabel={true}
+            />
+
+          </div>
+
+        </Column>
+        <Column style={{ flex: 0.05 }}>
+
+          <div hidden={show_pt_sliders === false}>
+
+            <SliderAdjustment
+              title={"Tilt"}
+              msgType={"std_msgs/Float32"}
+              adjustment={tilt_goal_ratio}
+              disabled={tilt_slider_disabled === true}
+              topic={tilt_slider_topic}
+              scaled={0.01}
+              min={0}
+              max={100}
+              tooltip={"Tilt as a percentage (0%=min, 100%=max)"}
+              unit={"%"}
+              vertical={true}
+              verticalHeight={tiltSliderHeight}
+              noTextBox={true}
+              noLabel={true}
+            />
+
+          </div>
+
+        </Column>
+        </Columns>
 
 
             </Section>

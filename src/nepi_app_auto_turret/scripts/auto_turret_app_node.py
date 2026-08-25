@@ -353,6 +353,30 @@ class NepiAutoTurretApp(object):
             'callback': self.setTiltPosDegCb,
             'callback_args': ()
         },
+        # Ratio position commands sit beside the degree ones because that is
+        # what the image viewer's flanking pan and tilt sliders speak. The
+        # sliders publish here, to the app, never to the pan tilt device -- the
+        # app owns the gating (connected, and no auto mode holding the axis) and
+        # forwards to the device. Ratio also spares the RUI from having to know
+        # the connected device's soft stops to build a degree command; the
+        # device maps 0.0-1.0 onto its own travel and reports the result back as
+        # pan_goal_ratio/tilt_goal_ratio in its status.
+        'set_pan_pos_ratio': {
+            'namespace': self.node_namespace,
+            'topic': 'set_pan_pos_ratio',
+            'msg': Float32,
+            'qsize': 1,
+            'callback': self.setPanPosRatioCb,
+            'callback_args': ()
+        },
+        'set_tilt_pos_ratio': {
+            'namespace': self.node_namespace,
+            'topic': 'set_tilt_pos_ratio',
+            'msg': Float32,
+            'qsize': 1,
+            'callback': self.setTiltPosRatioCb,
+            'callback_args': ()
+        },
         'set_speed_ratio': {
             'namespace': self.node_namespace,
             'topic': 'set_speed_ratio',
@@ -814,6 +838,43 @@ class NepiAutoTurretApp(object):
     self.msg_if.pub_info("Sending tilt position command: " + str(pos_deg))
     self.tilt_goto = pos_deg
     self.pantilt_connect_if.goto_to_tilt_position(pos_deg)
+    self.publish_status()
+
+  def setPanPosRatioCb(self, msg):
+    self.setPanPosRatio(msg.data)
+
+  def setPanPosRatio(self, pos_ratio):
+    ratio = self.clampRatio(pos_ratio)
+    if ratio is None:
+      return
+    if self.pantilt_connected == False:
+      self.msg_if.pub_warn("No pan tilt device connected; ignoring pan ratio command")
+      return
+    if self.getPanControlDisabled() == True:
+      self.msg_if.pub_warn("An auto mode owns the pan axis; ignoring pan ratio command")
+      return
+    self.msg_if.pub_info("Sending pan ratio command: " + str(ratio))
+    # pan_goto stays in degrees and is left alone here. Converting the ratio
+    # would mean duplicating the device's soft stop mapping in this node, and
+    # the acted-on goal comes back in pantilt_status_msg.pan_goal_deg anyway.
+    self.pantilt_connect_if.goto_pan_ratio(ratio)
+    self.publish_status()
+
+  def setTiltPosRatioCb(self, msg):
+    self.setTiltPosRatio(msg.data)
+
+  def setTiltPosRatio(self, pos_ratio):
+    ratio = self.clampRatio(pos_ratio)
+    if ratio is None:
+      return
+    if self.pantilt_connected == False:
+      self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt ratio command")
+      return
+    if self.getTiltControlDisabled() == True:
+      self.msg_if.pub_warn("An auto mode owns the tilt axis; ignoring tilt ratio command")
+      return
+    self.msg_if.pub_info("Sending tilt ratio command: " + str(ratio))
+    self.pantilt_connect_if.goto_tilt_ratio(ratio)
     self.publish_status()
 
   def setSpeedRatioCb(self, msg):
