@@ -150,7 +150,7 @@ class NepiAutoTurretApp(object):
     # from its own, so the child node name is load-bearing, not cosmetic.
     self.img_pub_node_name = self.node_name + IMG_PUB_NODE_SUFFIX
     self.img_pub_topic = nepi_sdk.create_namespace(
-                            self.node_namespace + IMG_PUB_NODE_SUFFIX,
+                            self.node_namespace,
                             IMG_PUB_DATA_PRODUCT)
 
     ##############################
@@ -1096,7 +1096,10 @@ class NepiAutoTurretApp(object):
     msg.use_last_image = True
 
     msg.imaging_source_topics = selected_sources
-    msg.imaging_pub_topics = self.img_pub_topic
+    # string[] in ProcessStatus.msg. Assigning the bare string made genpy
+    # serialize it one character per element, so the RUI source selector got a
+    # list of single characters, none of which matched a live topic.
+    msg.imaging_pub_topics = [self.img_pub_topic]
 
     msg.avg_source_latency = UNSET_VALUE
     msg.avg_source_rate = UNSET_VALUE
