@@ -1138,48 +1138,54 @@ class NepiAutoTurretApp(object):
     """
 
 
-    navpose_topic = self.getNavPoseTopic()
 
     status_msg = AutoTurretStatus()
 
     status_msg.process_status = self.get_process_status_msg()
 
 
+    pantilt_status_msg = None
     if self.pantilt_connect_if is not None:
-      self.pantilt_connect_if.set_auto_connect_enable(self.auto_select_enabled),
+      self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
       status_msg.selected_pantilt_topic = self.pantilt_connect_if.get_namespace()
-      status_msg.pantilt_connected = self.pantilt_connect_if.check_connection()
       pantilt_status_msg = self.pantilt_connect_if.get_status_msg()
     if pantilt_status_msg is None:
+      status_msg.selected_pantilt_topic = "None"
       pantilt_status_msg = DevicePTXStatus()
+    status_msg.pantilt_connected = self.pantilt_connected
     status_msg.pantilt_status_msg = pantilt_status_msg
 
-
+    image_status_msg = None
     if self.image_connect_if is not None:
       self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
       status_msg.selected_image_topic = self.image_connect_if.get_namespace()
-      status_msg.image_connected = self.image_connect_if.check_connection()
       image_status_msg = self.image_connect_if.get_status_msg()
     if image_status_msg is None:
+      status_msg.selected_image_topic = "None"
       image_status_msg = DevicePTXStatus()
+    status_msg.image_connected = self.image_connected
     status_msg.image_status_msg = image_status_msg
 
+    targets_status_msg = None
     if self.targets_connect_if is not None:
       self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
       status_msg.selected_targets_topic = self.targets_connect_if.get_namespace()
-      status_msg.targets_connected = self.targets_connect_if.check_connection()
       targets_status_msg = self.targets_connect_if.get_status_msg()
     if targets_status_msg is None:
+      status_msg.selected_targets_topic = "None"
       targets_status_msg = DevicePTXStatus()
+    status_msg.targets_connected = self.targets_connected
     status_msg.targets_status_msg = targets_status_msg
 
+    navpose_status_msg = None
     if self.navpose_connect_if is not None:
       self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled),
       status_msg.selected_navpose_topic = self.navpose_connect_if.get_namespace()
-      status_msg.navpose_connected = self.navpose_connect_if.check_connection()
       navpose_status_msg = self.navpose_connect_if.get_status_msg()
     if navpose_status_msg is None:
+      status_msg.selected_navpose_topic = "None"
       navpose_status_msg = DevicePTXStatus()
+    status_msg.navpose_connected = self.navpose_connected
     status_msg.navpose_status_msg = navpose_status_msg
 
     status_msg.scanning_ready = self.getScanningReady()
