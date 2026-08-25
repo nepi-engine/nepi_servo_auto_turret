@@ -1,8 +1,9 @@
 # This message details the AutoTurret Status Msg
 
 nepi_interfaces/ProcessStatus process_status
-
-nepi_interfaces/DevicePTXStatus pt_status_msg
+string selected_pantilt_topic
+bool selected_pantilt_connected
+nepi_interfaces/DevicePTXStatus pantilt_status_msg
 
 # Source selection lives on the connect interfaces, not here. Each of
 # <app>/ptx_connect, <app>/idx_connect and <app>/targets_connect publishes its
@@ -12,13 +13,18 @@ nepi_interfaces/DevicePTXStatus pt_status_msg
 # selected_image_topic stays because it is a parent-to-child contract, not a RUI
 # field: auto_turret_app_img_pub_node.py reads it to pick the image it overlays.
 string selected_image_topic
+bool selected_image_connected
+nepi_interfaces/ImageStatus image_status_msg
 
-bool has_navpose
-string navpose_topic
-bool navpose_topic_connected
+string selected_targets_topic
+bool selected_targets_connected
+nepi_interfaces/TargetingStatus targets_status_msg
 
-bool scanning_ready
-bool scanning_enabled
+string selected_navpose_topic
+bool selected_navpose_connected
+nepi_interfaces/NavposeStatus navpose_status_msg
+
+
 
 bool tracking_ready
 bool tracking_enabled

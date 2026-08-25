@@ -87,8 +87,8 @@ class NepiAutoTurretApp(object):
   # on <node>/<connect_name>. The matching RUI components (Nepi_IF_ConnectPTX,
   # Nepi_IF_ConnectIDX, Nepi_IF_ConnectTargets) render each row off that status,
   # so this node neither discovers nor selects sources itself.
-  ptx_connect_if = None
-  img_connect_if = None
+  pantilt_connect_if = None
+  image_connect_if = None
   targets_connect_if = None
 
   pt_connected = False
@@ -494,7 +494,7 @@ class NepiAutoTurretApp(object):
     # discovers its own candidates and restores its own persisted selection.
     # Each gets its own node_if (the default) rather than sharing this node's, so
     # their registry keys cannot collide with this node's or with each other's.
-    self.ptx_connect_if = ConnectPTXDeviceIF(
+    self.pantilt_connect_if = ConnectPTXDeviceIF(
                                     panTiltCb = self.panTiltCb,
                                     stopPanCb = self.stopPanCb,
                                     stopTiltCb = self.stopTiltCb,
@@ -505,7 +505,7 @@ class NepiAutoTurretApp(object):
                                     # node_if = self.node_if
                                     )
 
-    self.img_connect_if = ConnectImageIF(
+    self.image_connect_if = ConnectImageIF(
                                     connect_name = 'image_connect',
                                     filter_topic_list = ['color_image'],
                                     connect_data = False,
@@ -525,8 +525,8 @@ class NepiAutoTurretApp(object):
                                     # node_if = self.node_if
                                     )
 
-    for name, connect_if in [('pan tilt', self.ptx_connect_if),
-                              ('image', self.img_connect_if),
+    for name, connect_if in [('pan tilt', self.pantilt_connect_if),
+                              ('image', self.image_connect_if),
                               ('targets', self.targets_connect_if)]:
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
@@ -589,8 +589,8 @@ class NepiAutoTurretApp(object):
     # The connectors run their own discovery, selection and connection loops.
     # This updater only samples their connection state for the status message
     # and re-asserts the stored speed ratios when a pan tilt device connects.
-    self.pt_connected = self.checkConnected(self.ptx_connect_if)
-    self.image_connected = self.checkConnected(self.img_connect_if)
+    self.pt_connected = self.checkConnected(self.pantilt_connect_if)
+    self.image_connected = self.checkConnected(self.image_connect_if)
     self.targeter_connected = self.checkConnected(self.targets_connect_if)
     self.pushSpeedRatios()
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
@@ -621,9 +621,9 @@ class NepiAutoTurretApp(object):
     ratios = [self.speed_ratio, self.pan_speed_ratio, self.tilt_speed_ratio]
     if ratios == self.last_speed_ratios_pushed:
       return
-    self.ptx_connect_if.set_speed_ratio(self.speed_ratio)
-    self.ptx_connect_if.set_pan_speed_ratio(self.pan_speed_ratio)
-    self.ptx_connect_if.set_tilt_speed_ratio(self.tilt_speed_ratio)
+    self.pantilt_connect_if.set_speed_ratio(self.speed_ratio)
+    self.pantilt_connect_if.set_pan_speed_ratio(self.pan_speed_ratio)
+    self.pantilt_connect_if.set_tilt_speed_ratio(self.tilt_speed_ratio)
     self.last_speed_ratios_pushed = ratios
 
   def panTiltCb(self, pan_deg, tilt_deg):
@@ -686,25 +686,25 @@ class NepiAutoTurretApp(object):
   # connector's own available list, so no membership check is needed here.
 
   def setImageTopic(self, topic):
-    if self.img_connect_if is None:
+    if self.image_connect_if is None:
       return
     self.msg_if.pub_info("Setting image topic to: " + str(topic))
-    self.img_connect_if.set_selected_topic(topic)
+    self.image_connect_if.set_selected_topic(topic)
     self.publish_status()
 
   def addSourceTopicCb(self, msg):
     self.setImageTopic(msg.data)
 
   def removeSourceTopicCb(self, msg):
-    if msg.data == self.getSelectedTopic(self.img_connect_if):
+    if msg.data == self.getSelectedTopic(self.image_connect_if):
       self.setImageTopic('None')
 
   def addSourceTopicsCb(self, msg):
     # This app consumes one image at a time, so an array set takes the first
     # entry the connector knows about rather than silently dropping the msg.
     available = []
-    if self.img_connect_if is not None:
-      available = self.img_connect_if.get_available_topics()
+    if self.image_connect_if is not None:
+      available = self.image_connect_if.get_available_topics()
     for topic in msg.array:
       if topic in available:
         self.setImageTopic(topic)
@@ -712,7 +712,7 @@ class NepiAutoTurretApp(object):
     self.msg_if.pub_warn("No known image topic in source topics set: " + str(list(msg.array)))
 
   def removeSourceTopicsCb(self, msg):
-    if self.getSelectedTopic(self.img_connect_if) in msg.array:
+    if self.getSelectedTopic(self.image_connect_if) in msg.array:
       self.setImageTopic('None')
 
   def setAutoSelectEnableCb(self, msg):
@@ -760,7 +760,7 @@ class NepiAutoTurretApp(object):
       return
     self.msg_if.pub_info("Sending pan position command: " + str(pos_deg))
     self.pan_goto = pos_deg
-    self.ptx_connect_if.goto_to_pan_position(pos_deg)
+    self.pantilt_connect_if.goto_to_pan_position(pos_deg)
     self.publish_status()
 
   def setTiltPosDegCb(self, msg):
@@ -775,7 +775,7 @@ class NepiAutoTurretApp(object):
       return
     self.msg_if.pub_info("Sending tilt position command: " + str(pos_deg))
     self.tilt_goto = pos_deg
-    self.ptx_connect_if.goto_to_tilt_position(pos_deg)
+    self.pantilt_connect_if.goto_to_tilt_position(pos_deg)
     self.publish_status()
 
   def setSpeedRatioCb(self, msg):
@@ -784,7 +784,7 @@ class NepiAutoTurretApp(object):
       return
     self.speed_ratio = ratio
     if self.pt_connected == True:
-      self.ptx_connect_if.set_speed_ratio(ratio)
+      self.pantilt_connect_if.set_speed_ratio(ratio)
     self.setParam('speed_ratio', ratio)
     self.publish_status()
 
@@ -794,7 +794,7 @@ class NepiAutoTurretApp(object):
       return
     self.pan_speed_ratio = ratio
     if self.pt_connected == True:
-      self.ptx_connect_if.set_pan_speed_ratio(ratio)
+      self.pantilt_connect_if.set_pan_speed_ratio(ratio)
     self.setParam('pan_speed_ratio', ratio)
     self.publish_status()
 
@@ -804,7 +804,7 @@ class NepiAutoTurretApp(object):
       return
     self.tilt_speed_ratio = ratio
     if self.pt_connected == True:
-      self.ptx_connect_if.set_tilt_speed_ratio(ratio)
+      self.pantilt_connect_if.set_tilt_speed_ratio(ratio)
     self.setParam('tilt_speed_ratio', ratio)
     self.publish_status()
 
@@ -819,7 +819,7 @@ class NepiAutoTurretApp(object):
       self.msg_if.pub_warn("No pan tilt device connected; ignoring stop command")
       return
     self.msg_if.pub_info("Stopping pan tilt motion")
-    self.ptx_connect_if.stop_moving()
+    self.pantilt_connect_if.stop_moving()
     self.pan_goto = UNSET_VALUE
     self.tilt_goto = UNSET_VALUE
     self.publish_status()
@@ -834,18 +834,18 @@ class NepiAutoTurretApp(object):
     if self.pt_connected == False:
       self.msg_if.pub_warn("No pan tilt device connected; ignoring " + str(axis) + " home command")
       return
-    status_msg = self.ptx_connect_if.get_status_msg()
+    status_msg = self.pantilt_connect_if.get_status_msg()
     if status_msg is None or status_msg.has_homing == False:
       self.msg_if.pub_warn("Connected pan tilt device does not support homing")
       return
     if axis == 'pan':
       self.msg_if.pub_info("Sending pan home command")
       self.pan_goto = status_msg.pan_home_pos_deg
-      self.ptx_connect_if.goto_to_pan_position(status_msg.pan_home_pos_deg)
+      self.pantilt_connect_if.goto_to_pan_position(status_msg.pan_home_pos_deg)
     else:
       self.msg_if.pub_info("Sending tilt home command")
       self.tilt_goto = status_msg.tilt_home_pos_deg
-      self.ptx_connect_if.goto_to_tilt_position(status_msg.tilt_home_pos_deg)
+      self.pantilt_connect_if.goto_to_tilt_position(status_msg.tilt_home_pos_deg)
     self.publish_status()
 
   ###############################
@@ -947,17 +947,17 @@ class NepiAutoTurretApp(object):
     return self.targeter_connected
 
   def getNavPoseTopic(self):
-    if self.ptx_connect_if is None:
+    if self.pantilt_connect_if is None:
       return ''
-    status_msg = self.ptx_connect_if.get_status_msg()
+    status_msg = self.pantilt_connect_if.get_status_msg()
     if status_msg is None:
       return ''
     return status_msg.navpose_topic
 
   def getScanningReady(self):
-    if self.pt_connected == False or self.ptx_connect_if is None:
+    if self.pt_connected == False or self.pantilt_connect_if is None:
       return False
-    status_msg = self.ptx_connect_if.get_status_msg()
+    status_msg = self.pantilt_connect_if.get_status_msg()
     if status_msg is None:
       return False
     return status_msg.has_adjustable_speed == True
@@ -1043,10 +1043,10 @@ class NepiAutoTurretApp(object):
         nepi_interfaces/ProcessStatus: the fully populated sub-message.
     """
     image_connected = self.getImageConnected()
-    selected_image_topic = self.getSelectedTopic(self.img_connect_if)
+    selected_image_topic = self.getSelectedTopic(self.image_connect_if)
     available_image_topics = []
-    if self.img_connect_if is not None:
-      available_image_topics = list(self.img_connect_if.get_available_topics())
+    if self.image_connect_if is not None:
+      available_image_topics = list(self.image_connect_if.get_available_topics())
     selected_sources = []
     if selected_image_topic != 'None':
       selected_sources = [selected_image_topic]
@@ -1130,29 +1130,47 @@ class NepiAutoTurretApp(object):
     Returns:
         nepi_app_auto_turret/AutoTurretStatus: the fully populated status message.
     """
-    pt_status_msg = None
-    if self.ptx_connect_if is not None:
-      pt_status_msg = self.ptx_connect_if.get_status_msg()
-    if pt_status_msg is None:
-      pt_status_msg = DevicePTXStatus()
+
 
     navpose_topic = self.getNavPoseTopic()
 
     status_msg = AutoTurretStatus()
 
     status_msg.process_status = self.get_process_status_msg()
-    status_msg.pt_status_msg = pt_status_msg
 
-    # The only source field left in this message. It is NOT for the RUI -- the
-    # child image publisher node reads it to pick the image it overlays
-    # (auto_turret_app_img_pub_node.py:759). Available lists, targeter selection
-    # and per-source connection state all moved to the connectors' own status.
-    status_msg.selected_image_topic = self.getSelectedTopic(self.img_connect_if)
 
-    status_msg.has_navpose = (navpose_topic != '')
-    status_msg.navpose_topic = navpose_topic
-    status_msg.navpose_topic_connected = (navpose_topic != '' and
-                                          nepi_sdk.check_for_topic(navpose_topic) == True)
+    if self.pantilt_connect_if is not None:
+      status_msg.selected_pantilt_topic = self.pantilt_connect_if.get_namespace()
+      status_msg.selected_pantilt_connected = self.pantilt_connect_if.check_connection()
+      pantilt_status_msg = self.pantilt_connect_if.get_status_msg()
+    if pantilt_status_msg is None:
+      pantilt_status_msg = DevicePTXStatus()
+    status_msg.pantilt_status_msg = pantilt_status_msg
+
+
+    if self.image_connect_if is not None:
+      status_msg.selected_image_topic = self.image_connect_if.get_namespace()
+      status_msg.selected_image_connected = self.image_connect_if.check_connection()
+      image_status_msg = self.image_connect_if.get_status_msg()
+    if image_status_msg is None:
+      image_status_msg = DevicePTXStatus()
+    status_msg.image_status_msg = image_status_msg
+
+    if self.targets_connect_if is not None:
+      status_msg.selected_targets_topic = self.targets_connect_if.get_namespace()
+      status_msg.selected_targets_connected = self.targets_connect_if.check_connection()
+      targets_status_msg = self.targets_connect_if.get_status_msg()
+    if targets_status_msg is None:
+      targets_status_msg = DevicePTXStatus()
+    status_msg.targets_status_msg = targets_status_msg
+
+    if self.navpose_connect_if is not None:
+      status_msg.selected_navpose_topic = self.navpose_connect_if.get_namespace()
+      status_msg.selected_navpose_connected = self.navpose_connect_if.check_connection()
+      navpose_status_msg = self.navpose_connect_if.get_status_msg()
+    if navpose_status_msg is None:
+      navpose_status_msg = DevicePTXStatus()
+    status_msg.navpose_status_msg = navpose_status_msg
 
     status_msg.scanning_ready = self.getScanningReady()
     status_msg.scanning_enabled = self.scanning_enabled
@@ -1166,8 +1184,8 @@ class NepiAutoTurretApp(object):
     status_msg.pan_control_disabled = self.getPanControlDisabled()
     status_msg.tilt_control_disabled = self.getTiltControlDisabled()
 
-    if self.ptx_connect_if is not None:
-      status_msg.pan_tilt_max_speed_dps = self.ptx_connect_if.get_pan_tilt_max_speed_dps()
+    if self.pantilt_connect_if is not None:
+      status_msg.pan_tilt_max_speed_dps = self.pantilt_connect_if.get_pan_tilt_max_speed_dps()
     else:
       status_msg.pan_tilt_max_speed_dps = UNSET_VALUE
 
@@ -1186,10 +1204,10 @@ class NepiAutoTurretApp(object):
       status_msg.tilt_deg = UNSET_VALUE
 
     if self.pt_connected == True:
-      status_msg.pan_goal = pt_status_msg.pan_goal_deg
-      status_msg.tilt_goal = pt_status_msg.tilt_goal_deg
-      status_msg.pan_deg_per_sec = pt_status_msg.speed_pan_dps
-      status_msg.tilt_deg_per_sec = pt_status_msg.speed_tilt_dps
+      status_msg.pan_goal = pantilt_status_msg.pan_goal_deg
+      status_msg.tilt_goal = pantilt_status_msg.tilt_goal_deg
+      status_msg.pan_deg_per_sec = pantilt_status_msg.speed_pan_dps
+      status_msg.tilt_deg_per_sec = pantilt_status_msg.speed_tilt_dps
     else:
       status_msg.pan_goal = UNSET_VALUE
       status_msg.tilt_goal = UNSET_VALUE

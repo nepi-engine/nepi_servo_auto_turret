@@ -354,12 +354,26 @@ class NepiAppAutoTurret extends Component {
       <Columns>
       <Column>
 
-        <Label title="Auto Select Source">
-          <AsyncToggle
-            checked={auto_select_active === true}
-            onClick={() => sendBoolMsg(process_namespace + "/set_auto_select_enable", !auto_select_active)}>
-          </AsyncToggle>
-        </Label>
+
+
+
+
+        <Columns>
+        <Column>
+
+        </Column>
+        <Column>
+            <Label title="Auto Select Enable">
+              <AsyncToggle
+                checked={auto_select_active === true}
+                onClick={() => sendBoolMsg(process_namespace + "/set_auto_select_enable", !auto_select_active)}>
+              </AsyncToggle>
+            </Label>
+
+        </Column>
+        </Columns>
+
+
 
         {/* The three source rows. Each connector owns its own selector,
             available list, connection indicator and status readout, published
@@ -443,6 +457,10 @@ class NepiAppAutoTurret extends Component {
         <Column>
         </Column>
         </Columns>
+
+        
+        renderPTAuto
+
 
         {/* <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
@@ -658,12 +676,12 @@ const namespace = this.getNamespace()
     else {
 
 
-    const has_scan_pan = (status_msg.pt_status_msg.has_scan_pan)
-    const has_scan_tilt = (status_msg.pt_status_msg.has_scan_tilt)
-    const has_abs_pos = (status_msg.pt_status_msg.has_absolute_positioning)
-    const has_homing = (status_msg.pt_status_msg.has_homing)
-    const has_speed_control = (status_msg.pt_status_msg.has_adjustable_speed)
-    const has_sep_speed = (status_msg.pt_status_msg.has_seperate_pan_tilt_speed)
+    const has_scan_pan = (status_msg.pantilt_status_msg.has_scan_pan)
+    const has_scan_tilt = (status_msg.pantilt_status_msg.has_scan_tilt)
+    const has_abs_pos = (status_msg.pantilt_status_msg.has_absolute_positioning)
+    const has_homing = (status_msg.pantilt_status_msg.has_homing)
+    const has_speed_control = (status_msg.pantilt_status_msg.has_adjustable_speed)
+    const has_sep_speed = (status_msg.pantilt_status_msg.has_seperate_pan_tilt_speed)
 
     const disable_track_enable = ((track_source_connected === false || has_scan_pan === false || has_scan_tilt === false))
 
@@ -844,19 +862,19 @@ const namespace = this.getNamespace()
     else {
 
 
-    const has_scan_pan = (status_msg.pt_status_msg.has_scan_pan)
-    const has_scan_tilt = (status_msg.pt_status_msg.has_scan_tilt)
-    const has_abs_pos = (status_msg.pt_status_msg.has_absolute_positioning)
-    const has_homing = (status_msg.pt_status_msg.has_homing)
-    const has_speed_control = (status_msg.pt_status_msg.has_adjustable_speed)
-    const has_sep_speed = (status_msg.pt_status_msg.has_seperate_pan_tilt_speed)
+    const has_scan_pan = (status_msg.pantilt_status_msg.has_scan_pan)
+    const has_scan_tilt = (status_msg.pantilt_status_msg.has_scan_tilt)
+    const has_abs_pos = (status_msg.pantilt_status_msg.has_absolute_positioning)
+    const has_homing = (status_msg.pantilt_status_msg.has_homing)
+    const has_speed_control = (status_msg.pantilt_status_msg.has_adjustable_speed)
+    const has_sep_speed = (status_msg.pantilt_status_msg.has_seperate_pan_tilt_speed)
 
     const disable_track_enable = ((track_source_connected === false || has_scan_pan === false || has_scan_tilt === false))
 
     const disable_stab_enable = false
 
-      const panPosition = status_msg.pt_status_msg.pan_now_deg
-      const tiltPosition = status_msg.pt_status_msg.tilt_now_deg
+      const panPosition = status_msg.pantilt_status_msg.pan_now_deg
+      const tiltPosition = status_msg.pantilt_status_msg.tilt_now_deg
 
       const panPositionClean = panPosition + .001
       const tiltPositionClean = tiltPosition + .001
@@ -869,8 +887,8 @@ const namespace = this.getNamespace()
         this.setState({tiltGoto: tiltPositionClean})
       }
 
-      const panMove = status_msg.pt_status_msg.pan_goal_deg
-      const tiltMove = status_msg.pt_status_msg.tilt_goal_deg
+      const panMove = status_msg.pantilt_status_msg.pan_goal_deg
+      const tiltMove = status_msg.pantilt_status_msg.tilt_goal_deg
 
       const panMoveClean = panMove + .001
       const tiltMoveClean = tiltMove + .001
@@ -889,8 +907,8 @@ const namespace = this.getNamespace()
       const tilt_pos = this.state.tiltGoto //tilt_control_disabled === true ? tiltMoveClean : this.state.tiltGoto
 
 
-      const panCurSpeed = status_msg.pt_status_msg.speed_pan_dps
-      const tiltCurSpeed = status_msg.pt_status_msg.speed_tilt_dps
+      const panCurSpeed = status_msg.pantilt_status_msg.speed_pan_dps
+      const tiltCurSpeed = status_msg.pantilt_status_msg.speed_tilt_dps
 
       const panCurSpeedClean = panCurSpeed + .001
       const tiltCurSpeedClean = tiltCurSpeed + .001
