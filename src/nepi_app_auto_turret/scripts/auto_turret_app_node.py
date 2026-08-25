@@ -508,6 +508,7 @@ class NepiAutoTurretApp(object):
     self.img_connect_if = ConnectImageIF(
                                     connect_name = 'image_connect',
                                     filter_topic_list = ['color_image'],
+                                    connect_data = False,
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
@@ -1228,7 +1229,7 @@ class NepiAutoTurretApp(object):
 
   def shutdownCb(self):
     print("Shutting down: Executing script cleanup actions")
-
+    #nepi_sdk.kill_node(self.img_pub_node_name)
 
 
 #########################################

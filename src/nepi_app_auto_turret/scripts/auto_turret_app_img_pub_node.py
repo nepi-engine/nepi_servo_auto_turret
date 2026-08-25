@@ -49,8 +49,8 @@ WATCHDOG_TARGETS_TIMEOUT = 1
 WATCHDOG_TRACK_TIMEOUT = 1
 
 OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
-OVERLAY_TARGETS_COLOR = (0, 0, 0)
-OVERLAY_TRACK_COLOR = (0, 0, 0)
+OVERLAY_TARGETS_COLOR = (255, 255, 255)
+OVERLAY_TRACK_COLOR = (255, 0, 0)
 
 # Label font, hoisted out of the draw loop. Nothing about it varies per frame.
 OVERLAY_FONT = cv2.FONT_HERSHEY_DUPLEX
@@ -86,7 +86,7 @@ class AutoTurretImgPub:
     last_targets_time = 0
     show_targets_enabled = False
 
-    track_dict = dict()
+    track_dict = None
     track_lock = threading.Lock()
     last_track_time = 0
     show_track_enabled = False
@@ -457,7 +457,7 @@ class AutoTurretImgPub:
 
     def imageStatusCb(self, status_msg, args):
         source_topic = args
-        if self.img_info_dict is None:
+        if self.img_info_dict is None or nepi_sdk.is_shutdown() == True:
             return
         if source_topic not in self.img_info_dict.keys():
             return
@@ -471,7 +471,8 @@ class AutoTurretImgPub:
 
     def imageCb(self, image_msg, args):
         source_topic = args
-        if self.imaging_enabled == False or source_topic != self.selected_image_topic or self.img_info_dict is None:
+        needs_img = self.needsImgCheck()
+        if needs_img == False or self.imaging_enabled == False or source_topic != self.selected_image_topic or self.img_info_dict is None and nepi_sdk.is_shutdown() == False:
             return
 
         if self.img_info_dict['img_connected'] == False:
@@ -527,25 +528,19 @@ class AutoTurretImgPub:
             height_deg = 70
 
         targets_dict_list = copy.deepcopy(self.targets_dict_list)
-        draw_targets = (targets_dict_list is not None and len(targets_dict_list) > 0 and self.show_targets_enabled == True)
-
-        track_dict = copy.deepcopy(self.track_dict)
-        draw_track = (track_dict is not None and self.show_track_enabled == True)
-        
+        draw_targets = (targets_dict_list is not None and self.show_targets_enabled == True)
+        targets_count = -1
+        # if targets_dict_list is not None:
+        #     targets_count = len(targets_dict_list)
+        #self.msg_if.pub_info('Publishing Image with targets: ' + str([draw_targets,targets_count]), throttle_s = 5)       
 
         if draw_targets == True:
-            if track_dict is not None and draw_track == True:
-                    for i, target_dict in enumerate(targets_dict_list):
-                        if track_dict == target_dict:
-                            del targets_dict_list[i]
-            cv2_img = self.applyBoxesOverlay(targets_dict_list, cv2_img, OVERLAY_TARGETS_COLOR)
-
-        if draw_track == True:
-            cv2_img = self.applyBoxesOverlay(track_dict, cv2_img, OVERLAY_TRACK_COLOR)
-
+            cv2_det_img = self.apply_detection_overlay(source_topic,targets_dict_list, cv2_img, OVERLAY_TARGETS_COLOR)
+        else:
+            cv2_det_img = copy.deepcopy(cv2_img)
 
         
-        self.publishImgData(cv2_img,
+        self.publishImgData(cv2_det_img,
                             width_deg = width_deg,
                             height_deg = height_deg,
                             timestamp = timestamp,
@@ -554,7 +549,7 @@ class AutoTurretImgPub:
 
         if self.img_info_dict['img_published'] == False:
             namespace = self.img_info_dict['pub_namespace']
-            self.msg_if.pub_info('Published image topic: ' + os.path.join(namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT))
+            self.msg_if.pub_info('Published image topic: ' + os.path.join(self.process_namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT))
         self.img_info_dict['img_published'] = True
 
     def publishImgData(self, cv2_img, encoding = "bgr8", timestamp = None,
@@ -574,13 +569,35 @@ class AutoTurretImgPub:
         if self.img_if.ready == False:
             return
         else:
-            if self.show_crosshair_enabled == True:
-                [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
-                self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'pos_goal')
-                self.img_if.set_crosshairs_enable(True)
+            try:
+                if self.show_crosshair_enabled == True:
+                    [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
+                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Position Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
+                    self.img_if.set_crosshairs_size_ratio(0.4)
+                    self.img_if.set_crosshairs_thickness_ratio(0.4)
+                    self.img_if.set_crosshairs_enable(True)
+                else:
+                    self.img_if.remove_crosshair('Position Goal')
+                    self.img_if.set_crosshairs_enable(False)
+            except Exception as e:
+                self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
+
+            track_dict = copy.deepcopy(self.track_dict)
+            if track_dict is not None:
+                [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
             else:
-                self.img_if.remove_crosshair('pos_goal')
-                self.img_if.set_crosshairs_enable(False)
+                [x_deg,y_deg] = [0,0]
+            draw_track = (self.show_track_enabled == True)
+            try:
+                if draw_track == True:
+                    self.img_if.add_target_degs(x_deg,y_deg, name = 'Tracking', color_rgb = OVERLAY_TRACK_COLOR)
+                    self.img_if.set_targets_thickness_ratio(0.4)
+                    self.img_if.set_targets_enable(True)
+                else:
+                    self.img_if.remove_target('Tracking')
+                    self.img_if.set_targets_enable(False)
+            except Exception as e:
+                self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
 
             self.img_if.publish_cv2_img(cv2_img,
                                 encoding = encoding,
@@ -589,40 +606,35 @@ class AutoTurretImgPub:
                                 height_deg = height_deg,
                                 add_overlay_text_list = add_overlay_text_list
                                 )
-    
 
-    def getOverlayFontDims(self, cv2_img):
-        # Label metrics depend only on the frame size. Same numbers as before,
-        # computed once per size rather than once per frame.
+
+
+
+    def apply_detection_overlay(self,source_topic, boxes_dict_list, cv2_img, overlay_color = (0,0,127)):
+        cv2_det_img = copy.deepcopy(cv2_img)
         cv2_shape = cv2_img.shape
-        key = (cv2_shape[0], cv2_shape[1])
-        font_dims = self.font_dims_cache.get(key, None)
-        if font_dims is None:
-            img_height = cv2_shape[0]
-            img_width = cv2_shape[1]
-            scale = 1.5e-3 - 0.1e-3 * math.ceil(max([img_height, img_width]) / 700)
-            [font_scale, font_thickness] = nepi_img.optimal_font_dims(cv2_img, font_scale = scale, thickness_scale = scale)
-            line_thickness = 1 + math.ceil(max([img_height, img_width]) / 2000)
-            font_dims = [font_scale, font_thickness, line_thickness]
-        return font_dims
+        img_width = cv2_shape[1] 
+        img_height = cv2_shape[0] 
 
-    def applyBoxesOverlay(self, boxes_dict_list, cv2_img, default_color):
-        # Draws in place, same as applyDepthMapOverlay and for the same reason.
-        cv2_shape = cv2_img.shape
-        img_size = cv2_shape[:2]
+        for i, detect_dict in enumerate(boxes_dict_list):
+            img_size = cv2_img.shape[:2]
 
-        font = OVERLAY_FONT
-        [fontScale, fontThickness, line_thickness] = self.getOverlayFontDims(cv2_img)
-        fontColor = OVERLAY_FONT_COLOR
-        lineType = OVERLAY_LINE_TYPE
+            # Overlay text data on OpenCV image
+            font = OVERLAY_FONT
+            scale = 1.5e-3 - 0.1e-3 * math.ceil(max([img_height, img_width])/700)
+            fontScale, fontThickness  = nepi_img.optimal_font_dims(cv2_img,font_scale = scale, thickness_scale = scale, scale_ratio = 0.5) 
+            fontColor = (255, 255, 255)
+            fontColorBk = (0,0,0)
+            lineType = cv2.LINE_AA
 
-        for box_dict in boxes_dict_list:
+
             ###### Apply Image Overlays and Publish Image ROS Message
-            class_name = box_dict['name']
-            xmin = box_dict['xmin']
-            ymin = box_dict['ymin']
-            xmax = box_dict['xmax']
-            ymax = box_dict['ymax']
+            # Overlay adjusted detection boxes on image 
+            class_name = detect_dict['name']
+            xmin = detect_dict['xmin']
+            ymin = detect_dict['ymin']
+            xmax = detect_dict['xmax']
+            ymax = detect_dict['ymax']
 
             if xmin <= 0:
                 xmin = 5
@@ -633,63 +645,88 @@ class AutoTurretImgPub:
             if ymax >= img_size[0]:
                 ymax = img_size[0] - 5
 
+
             bot_left_box = (xmin, ymin)
             top_right_box = (xmax, ymax)
 
-            class_color = default_color
+
+            class_color = overlay_color
+           
+            #self.msg_if.pub_warn("Got Class Color: " + str(class_color) + ' type: ' + str(type(class_color)) + " type: " + str(type(class_color[0])) )
+            line_thickness = max(1, math.ceil(max([img_height, img_width])/2000))
+            
 
             success = False
             try:
-                cv2.rectangle(cv2_img, bot_left_box, top_right_box, class_color, thickness = line_thickness)
+                cv2.rectangle(cv2_det_img, bot_left_box, top_right_box, class_color, thickness=line_thickness)
                 success = True
             except Exception as e:
-                self.msg_if.pub_warn("Failed to create bounding box rectangle: " + str(e), throttle_s = 5.0)
+                self.msg_if.pub_warn("Failed to create bounding box rectangle: " + str(e))
 
-            if success == False:
-                continue
+            # Overlay text data on OpenCV image
+            if success == True:
 
-            ## Overlay Text
-            overlay_text = ""
-            if self.overlay_labels:
-                overlay_text = overlay_text + str(class_name) + " "
-            if self.overlay_range_bearing:
-                rb_text = ''
-                if box_dict['range_m'] != -999 and box_dict['range_m'] != '':
-                    rb_text = rb_text + str(round(box_dict['range_m'], 1)) + 'm :'
-                if box_dict['azimuth_deg'] != -999 and box_dict['elevation_deg'] != -999:
-                    rb_text = rb_text + str(round(box_dict['azimuth_deg'], 1)) + 'deg '
-                    rb_text = rb_text + str(round(box_dict['elevation_deg'], 1)) + 'deg '
-                if len(rb_text) > 0:
-                    overlay_text = overlay_text + rb_text
 
-            if len(overlay_text) == 0:
-                continue
+                ## Overlay Text
+                overlay_labels =  self.overlay_labels
+                overlay_range_bearing =  self.overlay_range_bearing
 
-            text_size = cv2.getTextSize(overlay_text, font, fontScale, fontThickness)
-            line_height = text_size[0][1]
-            line_width = text_size[0][0]
-            x_padding = int(line_height * 0.4)
-            y_padding = int(line_height * 0.4)
+                overlay_text = ""
 
-            center = bot_left_box[0] + int((top_right_box[0] - bot_left_box[0]) / 2)
-            bot_left_text = (center + x_padding, ymin - (line_thickness * 2) - y_padding)
-            text_bot_left_box = (center - x_padding, bot_left_text[1] + y_padding)
-            text_top_right_box = (center + line_width + x_padding, bot_left_text[1] - line_height - y_padding)
-            box_color = OVERLAY_TARGETS_COLOR
+                if overlay_labels:
+                    overlay_text = overlay_text + class_name + " "
+                if overlay_range_bearing:
+                    rb_text = ''
+                    if detect_dict['range_m'] != -999 and detect_dict['range_m'] != '':
+                        rb_text = rb_text + str(round(detect_dict['range_m'],1)) + 'm :'
+                    if detect_dict['azimuth_deg'] != -999 and detect_dict['elevation_deg'] != -999:
+                        rb_text = rb_text + str(round(detect_dict['azimuth_deg'],1)) + 'deg '
+                        rb_text = rb_text + str(round(detect_dict['elevation_deg'],1)) + 'deg '
+                    if len(rb_text) > 0:
+                        overlay_text = overlay_text + rb_text
 
-            try:
-                cv2.rectangle(cv2_img, text_bot_left_box, text_top_right_box, box_color, -1)
-                cv2.putText(cv2_img, overlay_text,
-                    bot_left_text,
-                    font,
-                    fontScale,
-                    fontColor,
-                    fontThickness,
-                    lineType)
-            except Exception as e:
-                self.msg_if.pub_warn("Failed to apply overlay label text: " + str(e), throttle_s = 5.0)
 
-        return cv2_img
+
+                if len(overlay_text) > 0:
+                    text2overlay=overlay_text
+                    text_size = cv2.getTextSize(text2overlay, 
+                        font, 
+                        fontScale,
+                        fontThickness)
+                    #self.msg_if.pub_warn("Text Size: " + str(text_size))
+                    line_height = text_size[0][1]
+                    line_width = text_size[0][0]
+                    x_padding = int(line_height*0.4)
+                    y_padding = int(line_height*0.4)
+                    
+                    center = bot_left_box[0] + int(( top_right_box[0] - bot_left_box[0]) / 2 )
+                    #bot_left_text = (xmin + (line_thickness * 2) + x_padding , ymin + line_height + (line_thickness * 2) + y_padding)
+                    bot_left_text = (center + x_padding , ymin - (line_thickness * 2) - y_padding)
+                    # Create Text Background Box
+                    #bot_left_box =  (bot_left_text[0] - x_padding , bot_left_text[1] + y_padding)
+                    bot_left_box =  ( center - x_padding, bot_left_text[1] + y_padding)
+                    top_right_box = (center + line_width + x_padding, bot_left_text[1] - line_height - y_padding )
+                    box_color = [0,0,0]
+
+                    try:
+                        cv2.rectangle(cv2_det_img, bot_left_box, top_right_box, box_color , -1)
+                        cv2.putText(cv2_det_img,text2overlay, 
+                            bot_left_text, 
+                            font, 
+                            fontScale,
+                            fontColor,
+                            fontThickness,
+                            lineType)
+                    except Exception as e:
+                        self.msg_if.pub_warn("Failed to apply overlay label text: " + str(e))
+
+                    # Start name overlays    
+                    x_start = int(img_width * 0.05)
+                    y_start = int(img_height * 0.05)
+
+
+        return cv2_det_img
+
 
     def getBoxDict(self, entry_dict):
         return {
@@ -703,9 +740,9 @@ class AutoTurretImgPub:
             'elevation_deg': entry_dict.get('elevation_deg', -999),
         }
 
-    def targetsCb(self, msg):
-        source_topic = msg.source_topic
-        if source_topic != self.selected_image_topic:
+    def targetsCb(self, msg, args):
+        source_topic = args
+        if source_topic != self.selected_image_topic or nepi_sdk.is_shutdown() == True:
             return
 
         current_time = nepi_utils.get_time()
