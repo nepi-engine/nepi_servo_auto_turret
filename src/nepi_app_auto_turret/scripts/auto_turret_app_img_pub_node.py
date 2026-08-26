@@ -99,7 +99,6 @@ class AutoTurretImgPub:
     font_dims_cache = dict()
     flat_color_cache = dict()
 
-    state_str_msg = 'Loading'
 
     clear_det_time = 1.0
 
@@ -148,11 +147,10 @@ class AutoTurretImgPub:
 
         self.msg_if.pub_info("Starting with Process Namespace: " + str(self.process_namespace))
 
-        self.status_msg = AutoTurretStatus()
         self.enabled = False
         self.state_str_msg = "Unknown"
         self.max_image_pub_rate_hz = 10
-        self.use_last_image = True
+        self.use_last_image = False
 
         self.imaging_enabled = True
 
@@ -492,9 +490,6 @@ class AutoTurretImgPub:
             self.msg_if.pub_info("Got image topic: " + str(source_topic))
         self.img_info_dict['connected'] = True
 
-        # if self.enabled == False or self.state_str_msg != AutoTurretStatus.STATE_PROCESSING:
-        #     return
-
         timestamp = float(image_msg.header.stamp.to_sec())
         self.img_info_dict['get_latency_time'] = (nepi_utils.get_time() - timestamp)
 
@@ -779,13 +774,12 @@ class AutoTurretImgPub:
     def statusCb(self, msg):
         self.last_status_time = nepi_utils.get_time()
 
-        self.status_msg = msg.process_status
 
-        self.enabled = self.status_msg.enabled
-        self.state_str_msg = self.status_msg.msg_str
-        self.max_image_pub_rate_hz = self.status_msg.max_image_pub_rate_hz
-        self.use_last_image = self.status_msg.use_last_image
-        self.imaging_enabled = self.status_msg.image_pub_enabled
+        self.enabled = True
+        self.state_str_msg = ''
+        self.max_image_pub_rate_hz = msg.max_image_pub_rate_hz
+        self.use_last_image = False #msg.use_last_image
+        self.imaging_enabled = True
 
         last_sel_imgs = copy.deepcopy(self.selected_image_topic)
         self.selected_image_topic = msg.selected_image_topic

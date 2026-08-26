@@ -22,10 +22,10 @@ import threading
 from std_msgs.msg import Empty, String, Bool, Float32
 
 from nepi_interfaces.msg import ControlsStatus
+from nepi_interfaces.msg import DataStatus
 from nepi_interfaces.msg import DevicePTXStatus
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import NavPoseStatus
-from nepi_interfaces.msg import ProcessStatus
 from nepi_interfaces.msg import TargetingStatus
 from nepi_interfaces.msg import Track
 from nepi_interfaces.msg import FloatArray, StringArray
@@ -1135,94 +1135,6 @@ class NepiAutoTurretApp(object):
   def statusPublishCb(self, timer):
     self.publish_status()
 
-  def get_process_status_msg(self):
-    """Build the embedded ProcessStatus sub-message.
-
-    The child overlay image publisher node reads enabled, msg_str,
-    image_pub_enabled, max_image_pub_rate_hz and use_last_image off this
-    sub-message, and the RUI reads its source-selection and stats fields, so
-    every field is assigned here rather than left at its default.
-
-    Returns:
-        nepi_interfaces/ProcessStatus: the fully populated sub-message.
-    """
-    image_connected = self.getImageConnected()
-    selected_image_topic = self.getSelectedTopic(self.image_connect_if)
-    available_image_topics = []
-    if self.image_connect_if is not None:
-      available_image_topics = list(self.image_connect_if.get_available_topics())
-    selected_sources = []
-    if selected_image_topic != 'None':
-      selected_sources = [selected_image_topic]
-
-    msg = ProcessStatus()
-    msg.name = PROCESS_NAME
-    msg.group = PROCESS_GROUP
-    msg.description = PROCESS_DESCRIPTION
-
-    msg.node_name = self.node_name
-    msg.namespace = self.node_namespace
-
-    msg.data_products = self.data_products
-    msg.save_data_topic = nepi_sdk.create_namespace(self.node_namespace, 'save_data')
-
-    msg.enabled = True
-    msg.running = True
-    msg.state = image_connected
-    if image_connected == True:
-      msg.msg_str = ProcessStatus.STATE_PROCESSING
-    elif selected_image_topic != 'None':
-      msg.msg_str = ProcessStatus.STATE_WAITING
-    else:
-      msg.msg_str = ProcessStatus.STATE_LISTENING
-
-    msg.max_process_rate_hz = self.max_process_rate_hz
-    msg.available_processes = []
-    msg.selected_process = ''
-    # This app exposes no ControlsIF, so the controls report is empty rather
-    # than absent. See the RUI note in the session report.
-    msg.process_controls = ControlsStatus()
-
-    msg.multi_source_enabled = False
-    msg.auto_select_enabled = self.auto_select_enabled
-    msg.auto_select_active = self.auto_select_enabled
-    msg.available_source_topics = available_image_topics
-    msg.selected_sources = selected_sources
-    msg.sources_connected = [image_connected] * len(selected_sources)
-    msg.sources_pub_namespaces = []
-
-    msg.source_selected = (selected_image_topic != 'None')
-    msg.source_connected = image_connected
-
-    msg.has_image_pub = True
-    msg.image_pub_name = IMG_PUB_DATA_PRODUCT
-    msg.image_pub_enabled = (selected_image_topic != 'None')
-    msg.max_image_pub_rate_hz = self.max_image_pub_rate_hz
-    msg.use_last_image = True
-
-    msg.imaging_source_topics = selected_sources
-    # string[] in ProcessStatus.msg. Assigning the bare string made genpy
-    # serialize it one character per element, so the RUI source selector got a
-    # list of single characters, none of which matched a live topic.
-    msg.imaging_pub_topics = [self.img_pub_topic]
-
-    msg.avg_source_latency = UNSET_VALUE
-    msg.avg_source_rate = UNSET_VALUE
-
-    msg.avg_preprocess_latency = UNSET_VALUE
-    msg.avg_preprocess_rate = UNSET_VALUE
-
-    msg.avg_process_latency = UNSET_VALUE
-    msg.avg_process_rate = UNSET_VALUE
-
-    msg.max_process_rate = self.max_process_rate_hz
-
-    msg.show_selector = True
-    msg.show_controls = True
-    msg.show_data = True
-    msg.show_results = True
-
-    return msg
 
   def get_status_msg(self):
     """Build the AutoTurretStatus message from current node state.
@@ -1239,8 +1151,16 @@ class NepiAutoTurretApp(object):
 
     status_msg = AutoTurretStatus()
 
-    status_msg.process_status = self.get_process_status_msg()
+    status_msg.node_name = self.node_name
+    status_msg.namespace = self.node_namespace
 
+    status_msg.data_products = self.data_products
+    status_msg.save_data_topic = nepi_sdk.create_namespace(self.node_namespace, 'save_data')
+
+    status_msg.max_process_rate_hz = self.max_process_rate_hz
+    status_msg.max_process_rate = self.max_process_rate_hz
+
+    status_msg.auto_select_enabled = self.auto_select_enabled
 
     # Each connect IF is None until its source is selected, so the local has to
     # be seeded before the guard and the empty fallback has to be the field's

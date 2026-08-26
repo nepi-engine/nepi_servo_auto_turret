@@ -1,6 +1,20 @@
 # This message details the AutoTurret Status Msg
 
-nepi_interfaces/ProcessStatus process_status
+string node_name
+string namespace
+
+string[] data_products
+string save_data_topic
+
+float32 max_process_rate_hz
+float32 max_image_pub_rate_hz
+
+bool auto_select_enabled
+
+string auto_controls_name
+nepi_interfaces/ControlsStatus auto_controls
+string auto_data_name
+nepi_interfaces/DataStatus auto_data
 
 string selected_pantilt_topic
 bool pantilt_connected

@@ -71,7 +71,6 @@ class NepiAppAutoTurret extends Component {
       appNamespace: null,
 
       status_msg: null,
-      process_status_msg: null,
       connected: false,
 
       sources_list_viewable: true,
@@ -99,13 +98,6 @@ class NepiAppAutoTurret extends Component {
 
     this.statusListener = this.statusListener.bind(this)
     this.updateStatusListener = this.updateStatusListener.bind(this)
-
-    this.createSourceTopicsOptions = this.createSourceTopicsOptions.bind(this)
-    this.toggleSourcesListViewable = this.toggleSourcesListViewable.bind(this)
-    this.onSourceTopicSelected = this.onSourceTopicSelected.bind(this)
-
-    this.getDisplayImgOptions = this.getDisplayImgOptions.bind(this)
-    this.onDisplayImgSelected = this.onDisplayImgSelected.bind(this)
 
 
     this.onPTUpdateText = this.onPTUpdateText.bind(this)
@@ -159,9 +151,9 @@ class NepiAppAutoTurret extends Component {
   }
 
   getSaveNamespace() {
-    const process_status_msg = this.state.process_status_msg
-    if (process_status_msg != null && process_status_msg.save_data_topic) {
-      return process_status_msg.save_data_topic
+    const status_msg = this.state.status_msg
+    if (status_msg != null && status_msg.save_data_topic) {
+      return status_msg.save_data_topic
     }
     const appNamespace = this.getAppNamespace()
     return (appNamespace != null) ? appNamespace + "/save_data" : "None"
@@ -189,7 +181,6 @@ class NepiAppAutoTurret extends Component {
     
     this.setState({
       status_msg: message,
-      process_status_msg: message.process_status,
       connected: true
     })
   }
@@ -232,7 +223,6 @@ class NepiAppAutoTurret extends Component {
     }
     this.setState({
       status_msg: null,
-      process_status_msg: null,
       connected: false,
       statusListener: null,
       selected_display_topic: "None",
@@ -240,61 +230,7 @@ class NepiAppAutoTurret extends Component {
     })
   }
 
-  //////////////////////////
-  // Source selection
 
-  // Options come from the app's own available_source_topics, which the app node
-  // fills by discovering DepthMapStatus publishers. The RUI does not do its own
-  // topic filtering -- the node is the single source of truth for what this
-  // process can consume.
-  createSourceTopicsOptions() {
-    const process_status_msg = this.state.process_status_msg
-    var items = []
-    items.push(<Option value={'None'}>{'None'}</Option>)
-    if (process_status_msg == null) {
-      return items
-    }
-    const source_options = process_status_msg.available_source_topics
-    if (source_options.length === 0) {
-      return items
-    }
-    items.push(<Option value={'All'}>{'All'}</Option>)
-    const sourceShortnames = createMenuFirstLastNames(source_options)
-    for (var i = 0; i < source_options.length; i++) {
-      items.push(<Option value={source_options[i]}>{sourceShortnames[i]}</Option>)
-    }
-    return items
-  }
-
-  toggleSourcesListViewable() {
-    const set = !this.state.sources_list_viewable
-    this.setState({ sources_list_viewable: set })
-  }
-
-  onSourceTopicSelected(event) {
-    const { sendStringMsg, sendStringArrayMsg } = this.props.ros
-    const process_namespace = this.getProcessNamespace()
-    const process_status_msg = this.state.process_status_msg
-    if (process_namespace == null || process_status_msg == null) {
-      return
-    }
-    const source_options = process_status_msg.available_source_topics
-    const selected_sources = process_status_msg.selected_sources
-    const source_topic = event.target.value
-
-    if (source_topic === "None") {
-      sendStringArrayMsg(process_namespace + "/remove_source_topics", source_options)
-    }
-    else if (source_topic === "All") {
-      sendStringArrayMsg(process_namespace + "/add_source_topics", source_options)
-    }
-    else if (selected_sources.indexOf(source_topic) === -1) {
-      sendStringMsg(process_namespace + "/add_source_topic", source_topic)
-    }
-    else {
-      sendStringMsg(process_namespace + "/remove_source_topic", source_topic)
-    }
-  }
 
   //////////////////////////
   // App panel
@@ -321,35 +257,18 @@ class NepiAppAutoTurret extends Component {
     const { sendBoolMsg } = this.props.ros
 
     const status_msg = this.state.status_msg
-    const process_status_msg = this.state.process_status_msg
+
     const process_namespace = this.getProcessNamespace()
     const controls_namespace = this.getControlsNamespace()
     // Each connector registers under <node namespace>/<connect_name>.
     const app_namespace = this.getAppNamespace()
 
-    const enabled = process_status_msg.enabled
-    const running = process_status_msg.running
-    const processing = process_status_msg.state
+    const max_process_rate_hz = status_msg.max_process_rate_hz
+    const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
 
-    const max_process_rate_hz = process_status_msg.max_process_rate_hz
-    const max_image_pub_rate_hz = process_status_msg.max_image_pub_rate_hz
-
-    const imaging_enabled = process_status_msg.image_pub_enabled
-    const use_last_image = process_status_msg.use_last_image
-
-    const auto_select_active = process_status_msg.auto_select_active
+    const auto_select_active = status_msg.auto_select_enabled
     const pantilt_connected = status_msg.pantilt_connected
-    const image_connected = status_msg.image_connected
-    const targets_connected = status_msg.targets_connected
-    const navpose_connected = status_msg.navpose_connected
-
-
-    const source_selected = process_status_msg.source_selected
-    const source_connected = process_status_msg.source_connected
-
-    const avg_process_latency = round(process_status_msg.avg_process_latency, 3)
-    const avg_process_rate = round(process_status_msg.avg_process_rate, 3)
-
+    
 
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
@@ -994,60 +913,6 @@ class NepiAppAutoTurret extends Component {
 
 
 
-
-  //////////////////////////
-  // Image viewer
-
-  // The overlay image topics are reported by the node in
-  // process_status.imaging_pub_topics, one per active source.
-  getDisplayImgOptions() {
-    const { imageTopics } = this.props.ros
-    var items = []
-    const process_status_msg = this.state.process_status_msg
-
-    var selected_image_topic = this.state.selected_display_topic
-    const selected_image_topic_found = (imageTopics.indexOf(selected_image_topic)) !== -1
-
-    if (process_status_msg == null) {
-      items.push(<Option value={"None"}>{"None"}</Option>)
-      return items
-    }
-
-    const image_pub_topics = process_status_msg.imaging_pub_topics
-    const image_names = createMenuFirstLastNames(image_pub_topics)
-    if (image_pub_topics.length === 0) {
-      items.push(<Option value={"None"}>{"None"}</Option>)
-      if (selected_image_topic !== 'None') {
-        this.setState({ selected_display_topic: "None", selected_display_text: "None" })
-      }
-      return items
-    }
-
-    if (selected_image_topic_found === false) {
-      selected_image_topic = image_pub_topics[0]
-      if (imageTopics.indexOf(selected_image_topic) !== -1) {
-        this.setState({ selected_display_topic: selected_image_topic, selected_display_text: image_names[0] })
-      }
-    }
-    for (var i = 0; i < image_pub_topics.length; i++) {
-      if (imageTopics.indexOf(image_pub_topics[i]) !== -1) {
-        items.push(<Option value={image_pub_topics[i]}>{image_names[i]}</Option>)
-        if ((selected_image_topic === "None" || selected_image_topic === '') && i === 0) {
-          this.setState({ selected_display_topic: image_pub_topics[i], selected_display_text: image_names[i] })
-        }
-      }
-    }
-    return items
-  }
-
-  onDisplayImgSelected(event) {
-    const source_topic = event.target.value
-    const names = createMenuFirstLastNames([source_topic])
-    this.setState({
-      selected_display_topic: source_topic,
-      selected_display_text: names[0]
-    })
-  }
 
 
 
