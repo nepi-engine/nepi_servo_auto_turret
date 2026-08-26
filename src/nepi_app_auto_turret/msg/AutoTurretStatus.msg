@@ -9,12 +9,9 @@ string save_data_topic
 float32 max_process_rate_hz
 float32 max_image_pub_rate_hz
 
-bool auto_select_enabled
 
-string auto_controls_name
-nepi_interfaces/ControlsStatus auto_controls
-string auto_data_name
-nepi_interfaces/DataStatus auto_data
+###############################
+bool auto_select_enabled
 
 string selected_pantilt_topic
 bool pantilt_connected
@@ -34,28 +31,34 @@ string selected_navpose_topic
 bool navpose_connected
 nepi_interfaces/NavPoseStatus navpose_status_msg
 
+###############################
+string auto_controls_namespace
+nepi_interfaces/ControlsStatus auto_controls
+string auto_data_namespace
+nepi_interfaces/DataStatus auto_data
+
 bool scanning_ready
 bool scanning_enabled
-string scan_controls_name
+string scan_controls_namespace
 nepi_interfaces/ControlsStatus scan_controls
-string scan_data_name
+string scan_data_namespace
 nepi_interfaces/DataStatus scan_data
 
 bool tracking_ready
 bool tracking_enabled
-string track_controls_name
+string track_controls_namespace
 nepi_interfaces/ControlsStatus track_controls
-string track_data_name
+string track_data_namespace
 nepi_interfaces/DataStatus track_data
 
 bool stabilize_ready
 bool stabilize_enabled
-string stab_controls_name
+string stab_controls_namespace
 nepi_interfaces/ControlsStatus stab_controls
-string stab_data_name
+string stab_data_namespace
 nepi_interfaces/DataStatus stab_data
 
-
+#############################
 bool pan_control_manaul_enabled
 bool tilt_control_manaul_enabled
 
@@ -70,9 +73,6 @@ float32 auto_tilt_ratio
 
 float32 auto_pan_deg
 float32 auto_tilt_deg
-
-
-
 
 
 ##############

@@ -20,6 +20,7 @@
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 
+import Toggle from "react-toggle"
 import Section from "./Section"
 import Label from "./Label"
 import { Column, Columns } from "./Columns"
@@ -40,7 +41,10 @@ import NepiIFControls from "./Nepi_IF_Controls"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
 
-import { createMenuFirstLastName, createMenuFirstLastNames } from "./Utilities"
+import Nepi_IF_Controls from "./Nepi_IF_Controls"
+import Nepi_IF_Data from "./Nepi_IF_Data"
+
+import { createMenuFirstLastName, createMenuFirstLastNames, onChangeChangeStateValue } from "./Utilities"
 import { setElementStyleModified, clearElementStyleModified } from "./Utilities"
 
 function round(value, decimals = 0) {
@@ -85,6 +89,7 @@ class NepiAppAutoTurret extends Component {
       tiltGoto: null,
       lastTiltGoto: null,
 
+      show_control: 'None',
 
       statusListener: null,
       needs_update: false
@@ -104,11 +109,11 @@ class NepiAppAutoTurret extends Component {
     this.onPTKeyText = this.onPTKeyText.bind(this)
     this.onStopClick = this.onStopClick.bind(this)
     this.renderApp = this.renderApp.bind(this)
-    this.renderAppSettings = this.renderAppSettings.bind(this)
+    this.renderAutoSettings = this.renderAutoSettings.bind(this)
     this.renderPTAuto = this.renderPTAuto.bind(this)
     this.renderPTControls = this.renderPTControls.bind(this)
-
     this.renderImageViewer = this.renderImageViewer.bind(this)
+    this.rendeAutoControls = this.rendeAutoControls.bind(this)
 
   }
 
@@ -247,13 +252,13 @@ class NepiAppAutoTurret extends Component {
           </pre>
         </div>
 
-        {(status_msg != null) ? this.renderAppSettings() : null}
+        {(status_msg != null) ? this.renderAutoSettings() : null}
 
       </Section>
     )
   }
 
-  renderAppSettings() {
+  renderAutoSettings() {
     const { sendBoolMsg } = this.props.ros
 
     const status_msg = this.state.status_msg
@@ -429,96 +434,10 @@ class NepiAppAutoTurret extends Component {
           
           {this.renderPTAuto()}
 
-        </div>
-
-        {/* <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-
-        <Label title={"STATUS"}></Label>
-
-        <div style={{ display: 'flex' }}>
-          <div style={{ width: '40%' }}>
-            <Label title={"Source Selected"}>
-              <BooleanIndicator value={source_selected} />
-            </Label>
-            <Label title={"NavPose"}>
-              <BooleanIndicator value={navpose_connected} />
-            </Label>
           </div>
 
-          <div style={{ width: '20%' }}>
-            {}
-          </div>
 
-          <div style={{ width: '40%' }}>
-            <Label title={"Source Connected"}>
-              <BooleanIndicator value={source_connected} />
-            </Label>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex' }}>
-          <div style={{ width: '40%' }}>
-            <Label title={"Running"}>
-              <BooleanIndicator value={running} />
-            </Label>
-          </div>
-
-          <div style={{ width: '20%' }}>
-            {}
-          </div>
-
-          <div style={{ width: '40%' }}>
-            <Label title={"Detect State"}>
-              <BooleanIndicator value={processing} />
-            </Label>
-          </div>
-        </div>
-
-        <pre style={{ height: "60px" }} align={"left"} textAlign={"left"}>
-        {"\n Avg Process Rate: " + avg_process_rate +
-         "\n Avg Process Latency: " + avg_process_latency}
-        </pre>
-
-        <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-
-        <label style={{ fontWeight: 'bold' }} align={"left"} textAlign={"left"}>
-          {"Process Settings"}
-        </label>
-
-        <SliderAdjustment
-          title={"Max Process Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_process_rate_hz}
-          topic={process_namespace + "/set_max_process_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets process max rate in hz"}
-          unit={"Hz"}
-        />
-
-        <SliderAdjustment
-          title={"Max Image Publish Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_image_pub_rate_hz}
-          topic={process_namespace + "/set_max_image_pub_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets overlay image max publish rate in hz"}
-          unit={"Hz"}
-        />
-
-
-
-        {(controls_namespace != null) ?
-          <NepiIFControls
-            namespace={controls_namespace}
-            title={"Auto Turret Controls"}
-          />
-        : null} */}
+          {this.rendeAutoControls()}
 
         <NepiIFConfig
           namespace={this.getAppNamespace()}
@@ -613,7 +532,7 @@ class NepiAppAutoTurret extends Component {
   // They were the source app's copies, publishing to set_scan_enable /
   // set_track_enable / set_stab_enable, none of which this node subscribes to
   // (the live topics are set_scanning_enable / set_tracking_enable /
-  // set_stabilize_enable, already rendered by renderAppSettings above).
+  // set_stabilize_enable, already rendered by renderAutoSettings above).
   renderPTAuto() {
     const status_msg = this.state.status_msg
 
@@ -1081,7 +1000,7 @@ class NepiAppAutoTurret extends Component {
                 <div id="autoTurretImageViewer">
                   <NepiIFImageViewer
                     image_topic={img_pub_topic}
-                    title={img_pub_text}
+                    title={''}
                     show_save_controls={false}
                     show_info_controls={false}
                     show_config_controls={false}
@@ -1143,6 +1062,182 @@ class NepiAppAutoTurret extends Component {
           )
         }
   }
+
+
+
+
+
+
+  rendeAutoControls() {
+   
+    const process_namespace = this.getProcessNamespace()
+
+    const status_msg = this.state.status_msg
+
+
+    if (status_msg == null || process_namespace == null){
+      return(
+
+        <Columns>
+        <Column>
+
+        </Column>
+        </Columns>
+
+      )
+
+    }
+    else {
+ 
+        const max_process_rate_hz = status_msg.max_process_rate_hz
+        const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
+
+        const show_control = this.state.show_control
+        return (
+          <React.Fragment>
+   
+       
+          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
+
+
+          <Label title={"Controls"}></Label>
+
+                  <div style={{ display: 'flex' }} >
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Track"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Stab"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Auto"}</div>
+                  </div>
+
+                  <div style={{ display: 'flex' }} >
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'scan')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'scan') ? 'None' : 'scan' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'track')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'track') ? 'None' : 'track' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'stab')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'stab') ? 'None' : 'stab' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                    <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+                        <Toggle
+                          checked={(show_control === 'auto')}
+                          onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'auto') ? 'None' : 'auto' )}>
+                        </Toggle>
+
+
+                    </div>
+
+
+              </div>
+
+
+      { ( show_control === 'scan' ) ?
+      <Nepi_IF_Controls
+        make_section={false}
+        title={null}
+        namespace={ status_msg.scan_controls_namespace}
+        status_msg={status_msg.scan_controls}
+        />
+        : null}
+
+
+      { ( show_control === 'track' ) ?
+      <Nepi_IF_Controls
+        make_section={false}
+        title={null}
+        namespace={ status_msg.track_controls_namespace}
+        status_msg={status_msg.track_controls}
+        />
+        : null}
+
+      { ( show_control === 'stab' ) ?
+      <Nepi_IF_Controls
+        make_section={false}
+        title={null}
+        namespace={ status_msg.stab_controls_namespace}
+        status_msg={status_msg.stab_controls}
+        />
+        : null}
+
+
+
+      { ( show_control === 'auto' ) ?
+
+        <SliderAdjustment
+          title={"Max Process Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_process_rate_hz}
+          topic={process_namespace + "/set_max_process_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets process max rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+
+      { ( show_control === 'auto' ) ?
+        <SliderAdjustment
+          title={"Max Image Publish Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_image_pub_rate_hz}
+          topic={process_namespace + "/set_max_image_pub_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets overlay image max publish rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+
+      { ( show_control === 'auto' ) ?
+      <Nepi_IF_Controls
+        make_section={false}
+        title={null}
+        namespace={ status_msg.auto_controls_namespace}
+        status_msg={status_msg.auto_controls}
+        />
+        : null}
+
+
+
+            </React.Fragment>
+        )
+  }
+}
+
+
 
 
 

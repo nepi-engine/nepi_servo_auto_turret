@@ -21,13 +21,14 @@ import threading
 
 from std_msgs.msg import Empty, String, Bool, Float32
 
-from nepi_interfaces.msg import ControlsStatus
-from nepi_interfaces.msg import DataStatus
 from nepi_interfaces.msg import DevicePTXStatus
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import NavPoseStatus
 from nepi_interfaces.msg import TargetingStatus
 from nepi_interfaces.msg import Track
+
+from nepi_interfaces.msg import Datum, DataStatus, Control, ControlsStatus
+
 from nepi_interfaces.msg import FloatArray, StringArray
 
 from nepi_app_auto_turret.msg import AutoTurretStatus
@@ -117,14 +118,41 @@ class NepiAutoTurretApp(object):
   tilt_control_auto_enabled = False
 
   # Auto modes. No control loop drives these yet; see setScanningEnableCb.
-  scanning_enabled = False
-  tracking_enabled = False
-  stabilize_enabled = False
 
   # Process controls
   auto_select_enabled = True
   max_process_rate_hz = 10.0
   max_image_pub_rate_hz = 10.0
+
+  auto_name = 'auto'
+  auto_controls_namespace = ''
+  auto_data_namespace = ''
+  auto_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
+  auto_data = nepi_sdk.convert_msg2dict(DataStatus())
+
+
+  scanning_enabled = False
+  scan_name = 'scan'
+  scan_controls_namespace = ''
+  scan_data_namespace = ''
+  scan_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
+  scan_data = nepi_sdk.convert_msg2dict(DataStatus())
+
+
+  tracking_enabled = False
+  track_name = 'track'
+  track_controls_namespace = ''
+  track_data_namespace = ''
+  track_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
+  track_data = nepi_sdk.convert_msg2dict(DataStatus())
+
+  stabilize_enabled = False
+  stab_name = 'stab'
+  stab_controls_namespace = ''
+  stab_data_namespace = ''
+  stab_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
+  stab_data = nepi_sdk.convert_msg2dict(DataStatus())
+
 
   # Overlay controls, consumed by the image publisher node off the status msg
   show_full_screen = False
@@ -157,6 +185,16 @@ class NepiAutoTurretApp(object):
     ##############################
     # Initialize Class Variables
     self.tracking_dict = copy.deepcopy(nepi_track.BLANK_SETTINGS_DICT)
+
+
+    self.auto_controls_namespace = self.node_namespace + '/process_' + self.auto_name + '_controls'
+    self.auto_data_namespace = self.node_namespace + '/process_' + self.auto_name + '_data'
+    self.scan_controls_namespace = self.node_namespace + '/process_' + self.scan_name + '_controls'
+    self.scan_data_namespace = self.node_namespace + '/process_' + self.scan_name + '_data'
+    self.track_controls_namespace = self.node_namespace + '/process_' + self.track_name + '_controls'
+    self.track_data_namespace = self.node_namespace + '/process_' + self.track_name + '_data'
+    self.stab_controls_namespace = self.node_namespace + '/process_' + self.stab_name + '_controls'
+    self.stab_data_namespace = self.node_namespace + '/process_' + self.stab_name + '_data'
 
     # Every connector is seeded here, before node_if setup, because
     # initCb(do_updates = True) below publishes a status during construction --
@@ -1158,9 +1196,11 @@ class NepiAutoTurretApp(object):
     status_msg.save_data_topic = nepi_sdk.create_namespace(self.node_namespace, 'save_data')
 
     status_msg.max_process_rate_hz = self.max_process_rate_hz
-    status_msg.max_process_rate = self.max_process_rate_hz
+    status_msg.max_image_pub_rate_hz = self.max_image_pub_rate_hz
 
     status_msg.auto_select_enabled = self.auto_select_enabled
+
+
 
     # Each connect IF is None until its source is selected, so the local has to
     # be seeded before the guard and the empty fallback has to be the field's
@@ -1212,14 +1252,33 @@ class NepiAutoTurretApp(object):
     status_msg.navpose_connected = self.navpose_connected
     status_msg.navpose_status_msg = navpose_status_msg
 
+
+    status_msg.auto_controls_namespace = self.auto_controls_namespace
+    status_msg.auto_data_namespace = self.auto_data_namespace
+    # status_msg.auto_controls = 
+    # status_msg.auto_data = 
+
+
     status_msg.scanning_ready = self.getScanningReady()
     status_msg.scanning_enabled = self.scanning_enabled
+    status_msg.scan_controls_namespace = self.scan_controls_namespace
+    status_msg.scan_data_namespace = self.scan_data_namespace
+    # status_msg.scan_controls = 
+    # status_msg.scan_data = 
 
     status_msg.tracking_ready = self.getTrackingReady()
     status_msg.tracking_enabled = self.tracking_enabled
+    status_msg.track_controls_namespace = self.track_controls_namespace
+    status_msg.track_data_namespace = self.track_data_namespace
+    # status_msg.track_controls = 
+    # status_msg.track_data = 
 
     status_msg.stabilize_ready = self.getStabilizeReady()
     status_msg.stabilize_enabled = self.stabilize_enabled
+    status_msg.stab_controls_namespace = self.stab_controls_namespace
+    status_msg.stab_data_namespace = self.stab_data_namespace
+    # status_msg.stab_controls = 
+    # status_msg.stab_data = 
 
 
     status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled
