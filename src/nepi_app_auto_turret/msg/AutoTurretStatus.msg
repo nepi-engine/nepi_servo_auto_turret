@@ -11,6 +11,7 @@ string selected_image_topic
 bool image_connected
 nepi_interfaces/ImageStatus image_status_msg
 
+
 string selected_targets_topic
 bool targets_connected
 nepi_interfaces/TargetingStatus targets_status_msg
@@ -21,37 +22,42 @@ nepi_interfaces/NavPoseStatus navpose_status_msg
 
 bool scanning_ready
 bool scanning_enabled
+string scan_controls_name
+nepi_interfaces/ControlsStatus scan_controls
+string scan_data_name
+nepi_interfaces/DataStatus scan_data
 
 bool tracking_ready
 bool tracking_enabled
+string track_controls_name
+nepi_interfaces/ControlsStatus track_controls
+string track_data_name
+nepi_interfaces/DataStatus track_data
 
 bool stabilize_ready
 bool stabilize_enabled
+string stab_controls_name
+nepi_interfaces/ControlsStatus stab_controls
+string stab_data_name
+nepi_interfaces/DataStatus stab_data
+
+
+bool pan_control_manaul_enabled
+bool tilt_control_manaul_enabled
+
+bool pan_control_auto_enabled
+bool tilt_control_auto_enabled
 
 bool pan_control_disabled
 bool tilt_control_disabled
 
+float32 auto_pan_ratio
+float32 auto_tilt_ratio
+
+float32 auto_pan_deg
+float32 auto_tilt_deg
 
 
-#unset values are -999
-float32 pan_tilt_max_speed_dps
-float32 pan_tilt_avg_move_delay
-
-float32 speed_ratio
-float32 pan_speed_ratio
-float32 tilt_speed_ratio
-
-float32 pan_deg
-float32 tilt_deg
-
-float32 pan_goal
-float32 tilt_goal
-
-float32 pan_deg_per_sec
-float32 tilt_deg_per_sec
-
-float32 pan_goto
-float32 tilt_goto
 
 
 

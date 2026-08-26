@@ -112,8 +112,9 @@ class AutoTurretImgPub:
 
     has_color_image = False
 
-
-
+    
+    draw_track = False
+    draw_crosshair = False
 
     overlay_labels = True
     overlay_range_bearing = True
@@ -572,34 +573,42 @@ class AutoTurretImgPub:
 
 
 
-            track_dict = copy.deepcopy(self.track_dict)
-            if track_dict is not None:
-                [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
-            else:
-                [x_deg,y_deg] = [0,0]
+
             draw_track = (self.show_track_enabled == True)
             try:
                 if draw_track == True:
-                    self.img_if.add_target_degs(x_deg,y_deg, name = 'Tracking', color_rgb = OVERLAY_TRACK_COLOR)
-                    self.img_if.set_targets_thickness_ratio(0.4)
-                    self.img_if.set_targets_enable(True)
-                else:
-                    self.img_if.remove_target('Tracking')
-                    self.img_if.set_targets_enable(False)
+                    track_dict = copy.deepcopy(self.track_dict)
+                    if track_dict is not None:
+                        [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
+                    else:
+                        [x_deg,y_deg] = [0,0]
+                    self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
+
+                if self.draw_track != draw_track:
+                    if draw_track == True:
+                        self.img_if.set_targets_size_ratio(0.4)
+                        self.img_if.set_targets_thickness_ratio(0.4)
+                    else:
+                        self.img_if.remove_target('Track Goal')
+                    self.img_if.set_targets_enable(draw_track)
+                    self.draw_track = draw_track
             except Exception as e:
                 self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
 
 
+            draw_crosshair = (self.show_crosshair_enabled == True)
             try:
-                if self.show_crosshair_enabled == True:
+                if draw_crosshair == True:
                     [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
-                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Position Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
-                    self.img_if.set_crosshairs_size_ratio(0.4)
-                    self.img_if.set_crosshairs_thickness_ratio(0.4)
-                    self.img_if.set_crosshairs_enable(True)
-                else:
-                    self.img_if.remove_crosshair('Position Goal')
-                    self.img_if.set_crosshairs_enable(False)
+                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Move Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
+                if self.draw_crosshair != draw_crosshair:
+                    if draw_crosshair == True:
+                        self.img_if.set_crosshairs_size_ratio(0.4)
+                        self.img_if.set_crosshairs_thickness_ratio(0.4)
+                    else:
+                        self.img_if.remove_target('Move Goal')
+                    self.img_if.set_crosshairs_enable(draw_crosshair)
+                    self.draw_crosshair = draw_crosshair
             except Exception as e:
                 self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
 

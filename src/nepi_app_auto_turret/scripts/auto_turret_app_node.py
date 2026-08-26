@@ -110,6 +110,12 @@ class NepiAutoTurretApp(object):
   tilt_speed_ratio = 0.5
   last_speed_ratios_pushed = None
 
+  pan_control_manaul_enabled = True
+  tilt_control_manaul_enabled = True
+
+  pan_control_auto_enabled = False
+  tilt_control_auto_enabled = False
+
   # Auto modes. No control loop drives these yet; see setScanningEnableCb.
   scanning_enabled = False
   tracking_enabled = False
@@ -577,6 +583,7 @@ class NepiAutoTurretApp(object):
     self.navpose_connect_if = ConnectNavPoseIF(
                                     connect_name = 'navpose_connect',
                                     auto_select_enabled = self.auto_select_enabled,
+                                    filter_topic_list=['navposes'],
                                     connect_data = False,
                                     show_selector = True,
                                     show_controls = False,
@@ -1071,12 +1078,10 @@ class NepiAutoTurretApp(object):
     return self.pantilt_connected == True and nepi_sdk.check_for_topic(navpose_topic) == True
 
   def getPanControlDisabled(self):
-    return (self.scanning_enabled == True or
-            self.tracking_enabled == True or
-            self.stabilize_enabled == True)
+    return (self.pan_control_manaul_enabled == False and self.pan_control_auto_enabled == False)
 
   def getTiltControlDisabled(self):
-    return self.getPanControlDisabled()
+    return (self.tilt_control_manaul_enabled == False and self.tilt_control_auto_enabled == False)
 
   def setParam(self, param_name, value):
     if self.node_if is None:
@@ -1296,41 +1301,16 @@ class NepiAutoTurretApp(object):
     status_msg.stabilize_ready = self.getStabilizeReady()
     status_msg.stabilize_enabled = self.stabilize_enabled
 
+
+    status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled
+    status_msg.tilt_control_manaul_enabled = self.tilt_control_manaul_enabled
+
+    status_msg.pan_control_auto_enabled = self.pan_control_auto_enabled
+    status_msg.tilt_control_auto_enabled = self.tilt_control_auto_enabled
+
     status_msg.pan_control_disabled = self.getPanControlDisabled()
     status_msg.tilt_control_disabled = self.getTiltControlDisabled()
 
-    if self.pantilt_connect_if is not None:
-      status_msg.pan_tilt_max_speed_dps = self.pantilt_connect_if.get_pan_tilt_max_speed_dps()
-    else:
-      status_msg.pan_tilt_max_speed_dps = UNSET_VALUE
-
-    # Nothing in this node measures pan tilt command-to-motion latency.
-    status_msg.pan_tilt_avg_move_delay = UNSET_VALUE
-
-    status_msg.speed_ratio = self.speed_ratio
-    status_msg.pan_speed_ratio = self.pan_speed_ratio
-    status_msg.tilt_speed_ratio = self.tilt_speed_ratio
-
-    if self.pt_position is not None:
-      status_msg.pan_deg = self.pt_position[0]
-      status_msg.tilt_deg = self.pt_position[1]
-    else:
-      status_msg.pan_deg = UNSET_VALUE
-      status_msg.tilt_deg = UNSET_VALUE
-
-    if self.pantilt_connected == True:
-      status_msg.pan_goal = pantilt_status_msg.pan_goal_deg
-      status_msg.tilt_goal = pantilt_status_msg.tilt_goal_deg
-      status_msg.pan_deg_per_sec = pantilt_status_msg.speed_pan_dps
-      status_msg.tilt_deg_per_sec = pantilt_status_msg.speed_tilt_dps
-    else:
-      status_msg.pan_goal = UNSET_VALUE
-      status_msg.tilt_goal = UNSET_VALUE
-      status_msg.pan_deg_per_sec = UNSET_VALUE
-      status_msg.tilt_deg_per_sec = UNSET_VALUE
-
-    status_msg.pan_goto = self.pan_goto
-    status_msg.tilt_goto = self.tilt_goto
 
     status_msg.image_pub_topic = self.img_pub_topic
 
