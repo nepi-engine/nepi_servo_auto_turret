@@ -792,11 +792,11 @@ class NepiAutoTurretApp(object):
   def stopTiltCb(self):
     self.tilt_goto = UNSET_VALUE
 
-  def targetsCb(self, targets_dict_list):
-    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict_list), throttle_s = 5)
+  def targetsCb(self, targets_dict):
+    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict), throttle_s = 5)
     self.last_targets_time = nepi_utils.get_time()
     self.targets_lock.acquire()
-    self.targets_dict_list = targets_dict_list
+    self.targets_dict_list = targets_dict['targets']
     self.targets_lock.release()
     #self.msg_if.pub_warn("Added target list for name " + str(target_dict['target_name']))
         
