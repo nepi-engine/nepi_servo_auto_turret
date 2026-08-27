@@ -793,7 +793,7 @@ class NepiAutoTurretApp(object):
     self.tilt_goto = UNSET_VALUE
 
   def targetsCb(self, msg):
-    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(msg))
+    self.msg_if.pub_info("Targets callback got new targets mgs: " + str(msg), throttle_s = 5)
     self.last_targets_time = nepi_utils.get_time()
     self.targets_msg = msg.targets
     timestamp = msg.source_timestamp
