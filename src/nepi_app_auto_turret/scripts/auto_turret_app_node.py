@@ -35,7 +35,7 @@ from nepi_app_auto_turret.msg import AutoTurretStatus
 
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
-from nepi_sdk import nepi_track
+from nepi_sdk import nepi_targets_track
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
@@ -124,34 +124,26 @@ class NepiAutoTurretApp(object):
   max_process_rate_hz = 10.0
   max_image_pub_rate_hz = 10.0
 
-  auto_name = 'auto'
-  auto_controls_namespace = ''
-  auto_data_namespace = ''
-  auto_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
-  auto_data = nepi_sdk.convert_msg2dict(DataStatus())
-
+  auto_process_name = 'process_auto'
+  auto_process_namespace = ''
+  auto_process_if = None
+  
 
   scanning_enabled = False
-  scan_name = 'scan'
-  scan_controls_namespace = ''
-  scan_data_namespace = ''
-  scan_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
-  scan_data = nepi_sdk.convert_msg2dict(DataStatus())
+  scan_process_name = 'process_scan'
+  scan_process_namespace = ''
+  scan_process_if = None
 
 
   tracking_enabled = False
-  track_name = 'track'
-  track_controls_namespace = ''
-  track_data_namespace = ''
-  track_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
-  track_data = nepi_sdk.convert_msg2dict(DataStatus())
+  track_process_name = 'process_track'
+  track_process_namespace = ''
+  track_process_if = None
 
   stabilize_enabled = False
-  stab_name = 'stab'
-  stab_controls_namespace = ''
-  stab_data_namespace = ''
-  stab_controls = nepi_sdk.convert_msg2dict(ControlsStatus())
-  stab_data = nepi_sdk.convert_msg2dict(DataStatus())
+  stab_process_name = 'process_stab'
+  stab_process_namespace = ''
+  stab_process_if = None
 
 
   # Overlay controls, consumed by the image publisher node off the status msg
@@ -184,17 +176,17 @@ class NepiAutoTurretApp(object):
 
     ##############################
     # Initialize Class Variables
-    self.tracking_dict = copy.deepcopy(nepi_track.BLANK_SETTINGS_DICT)
+   
 
 
-    self.auto_controls_namespace = self.node_namespace + '/process_' + self.auto_name + '_controls'
-    self.auto_data_namespace = self.node_namespace + '/process_' + self.auto_name + '_data'
-    self.scan_controls_namespace = self.node_namespace + '/process_' + self.scan_name + '_controls'
-    self.scan_data_namespace = self.node_namespace + '/process_' + self.scan_name + '_data'
-    self.track_controls_namespace = self.node_namespace + '/process_' + self.track_name + '_controls'
-    self.track_data_namespace = self.node_namespace + '/process_' + self.track_name + '_data'
-    self.stab_controls_namespace = self.node_namespace + '/process_' + self.stab_name + '_controls'
-    self.stab_data_namespace = self.node_namespace + '/process_' + self.stab_name + '_data'
+    self.auto_process_namespace = self.node_namespace + '/' + self.auto_process_name
+
+    self.scan_process_namespace = self.node_namespace + '/' + self.scan_process_name
+
+    self.track_process_namespace = self.node_namespace + '/' + self.track_process_name
+    
+    self.stab_process_namespace = self.node_namespace + '/' + self.stab_process_name
+
 
     # Every connector is seeded here, before node_if setup, because
     # initCb(do_updates = True) below publishes a status during construction --
@@ -760,7 +752,7 @@ class NepiAutoTurretApp(object):
     targets_dict_list = data.get('targets', [])
     if len(targets_dict_list) == 0:
       return
-    [best_target, tracking_dict] = nepi_track.get_best_from_targets(
+    [best_target, tracking_dict] = nepi_targets_track.get_best_from_targets(
                                         targets_dict_list,
                                         tracking_dict = self.tracking_dict)
     self.tracking_dict = tracking_dict
@@ -1253,32 +1245,23 @@ class NepiAutoTurretApp(object):
     status_msg.navpose_status_msg = navpose_status_msg
 
 
-    status_msg.auto_controls_namespace = self.auto_controls_namespace
-    status_msg.auto_data_namespace = self.auto_data_namespace
-    # status_msg.auto_controls = 
-    # status_msg.auto_data = 
+    status_msg.auto_process_namespace = self.auto_process_namespace
+
 
 
     status_msg.scanning_ready = self.getScanningReady()
     status_msg.scanning_enabled = self.scanning_enabled
-    status_msg.scan_controls_namespace = self.scan_controls_namespace
-    status_msg.scan_data_namespace = self.scan_data_namespace
-    # status_msg.scan_controls = 
-    # status_msg.scan_data = 
+    status_msg.scan_process_namespace = self.scan_process_namespace
+
 
     status_msg.tracking_ready = self.getTrackingReady()
     status_msg.tracking_enabled = self.tracking_enabled
-    status_msg.track_controls_namespace = self.track_controls_namespace
-    status_msg.track_data_namespace = self.track_data_namespace
-    # status_msg.track_controls = 
-    # status_msg.track_data = 
+    status_msg.track_process_namespace = self.track_process_namespace
+
 
     status_msg.stabilize_ready = self.getStabilizeReady()
     status_msg.stabilize_enabled = self.stabilize_enabled
-    status_msg.stab_controls_namespace = self.stab_controls_namespace
-    status_msg.stab_data_namespace = self.stab_data_namespace
-    # status_msg.stab_controls = 
-    # status_msg.stab_data = 
+    status_msg.stab_process_namespace = self.stab_process_namespace
 
 
     status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled

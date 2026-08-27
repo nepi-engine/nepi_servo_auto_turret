@@ -32,31 +32,20 @@ bool navpose_connected
 nepi_interfaces/NavPoseStatus navpose_status_msg
 
 ###############################
-string auto_controls_namespace
-nepi_interfaces/ControlsStatus auto_controls
-string auto_data_namespace
-nepi_interfaces/DataStatus auto_data
+string auto_process_namespace
 
 bool scanning_ready
 bool scanning_enabled
-string scan_controls_namespace
-nepi_interfaces/ControlsStatus scan_controls
-string scan_data_namespace
-nepi_interfaces/DataStatus scan_data
+string scan_process_namespace
+
 
 bool tracking_ready
 bool tracking_enabled
-string track_controls_namespace
-nepi_interfaces/ControlsStatus track_controls
-string track_data_namespace
-nepi_interfaces/DataStatus track_data
+string track_process_namespace
 
 bool stabilize_ready
 bool stabilize_enabled
-string stab_controls_namespace
-nepi_interfaces/ControlsStatus stab_controls
-string stab_data_namespace
-nepi_interfaces/DataStatus stab_data
+string stab_process_namespace
 
 #############################
 bool pan_control_manaul_enabled
