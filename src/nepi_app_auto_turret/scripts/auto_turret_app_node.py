@@ -792,19 +792,11 @@ class NepiAutoTurretApp(object):
   def stopTiltCb(self):
     self.tilt_goto = UNSET_VALUE
 
-  def targetsCb(self, msg):
-    self.msg_if.pub_info("Targets callback got new targets mgs: " + str(msg), throttle_s = 5)
+  def targetsCb(self, targets_dict_list):
+    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict_list), throttle_s = 5)
     self.last_targets_time = nepi_utils.get_time()
-    self.targets_msg = msg.targets
-    timestamp = msg.source_timestamp
-    if timestamp is None or timestamp <= 0.0:
-        # Detector left source_timestamp unset -> use arrival time so the
-        # state-buffer resolve gets a positive query on the feeders' clock.
-        timestamp = nepi_utils.get_time()
-      
-    targets_dict_list = []
-    for target_msg in self.targets_msg:
-        target_dict = nepi_targets.convert_target_msg2dict(target_msg)
+    self.targets_dict_list = targets_dict_list 
+    for target_dict in self.targets_dict_list:
         if target_dict is not None:
             self.targets_lock.acquire()
             self.targets_dict_list.append(target_dict)
