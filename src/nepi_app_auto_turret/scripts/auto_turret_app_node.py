@@ -36,10 +36,13 @@ from nepi_app_auto_turret.msg import AutoTurretStatus
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
 from nepi_sdk import nepi_targets_track
+from nepi_sdk import nepi_controls
+from nepi_sdk import nepi_data
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
 from nepi_api.system_if import SaveDataIF
+from nepi_api.process_if import ProcessIF
 from nepi_api.connect_device_if_ptx import ConnectPTXDeviceIF
 from nepi_api.connect_data_if import ConnectImageIF
 from nepi_api.connect_data_if import ConnectNavPoseIF
@@ -127,24 +130,29 @@ class NepiAutoTurretApp(object):
   auto_process_name = 'process_auto'
   auto_process_namespace = ''
   auto_process_if = None
-  
+  auto_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
+  auto_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   scanning_enabled = False
   scan_process_name = 'process_scan'
   scan_process_namespace = ''
   scan_process_if = None
-
+  scan_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
+  scan_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   tracking_enabled = False
   track_process_name = 'process_track'
   track_process_namespace = ''
   track_process_if = None
+  track_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
+  track_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   stabilize_enabled = False
   stab_process_name = 'process_stab'
   stab_process_namespace = ''
   stab_process_if = None
-
+  stab_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
+  stab_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   # Overlay controls, consumed by the image publisher node off the status msg
   show_full_screen = False
@@ -628,6 +636,64 @@ class NepiAutoTurretApp(object):
                               ('navpose', self.navpose_connect_if)]:
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
+
+    ##############################
+    self.auto_process_if = ProcessIF(process_name = self.auto_process_name,
+                process_group = self.node_name,
+                process_description = self.auto_process_name,
+                process_data_dict = self.auto_process_data,
+                process_controls_dict = self.auto_process_controls,
+                process_status_msg = None,
+                show_controls = True,
+                show_data = True,
+                log_name = None,
+                log_name_list = [],
+                msg_if = self.msg_if,
+                node_if = self.node_if
+    )  
+
+    self.scan_process_if = ProcessIF(process_name = self.scan_process_name,
+                process_group = self.node_name,
+                process_description = self.scan_process_name,
+                process_data_dict = self.scan_process_data,
+                process_controls_dict = self.scan_process_controls,
+                process_status_msg = None,
+                show_controls = True,
+                show_data = True,
+                log_name = None,
+                log_name_list = [],
+                msg_if = self.msg_if,
+                node_if = self.node_if
+    )  
+
+    self.track_process_if = ProcessIF(process_name = self.track_process_name,
+                process_group = self.node_name,
+                process_description = self.track_process_name,
+                process_data_dict = self.track_process_data,
+                process_controls_dict = self.track_process_controls,
+                process_status_msg = None,
+                show_controls = True,
+                show_data = True,
+                log_name = None,
+                log_name_list = [],
+                msg_if = self.msg_if,
+                node_if = self.node_if
+    )  
+
+    self.stab_process_if = ProcessIF(process_name = self.stab_process_name,
+                process_group = self.node_name,
+                process_description = self.stab_process_name,
+                process_data_dict = self.stab_process_data,
+                process_controls_dict = self.stab_process_controls,
+                process_status_msg = None,
+                show_controls = True,
+                show_data = True,
+                log_name = None,
+                log_name_list = [],
+                msg_if = self.msg_if,
+                node_if = self.node_if
+    )  
+
 
     ##############################
     self.initCb(do_updates = True)
@@ -1139,6 +1205,16 @@ class NepiAutoTurretApp(object):
       self.show_track_enabled = self.node_if.get_param('show_track_enabled')
       self.show_crosshair_enabled = self.node_if.get_param('show_crosshair_enabled')
       self.crosshair_offset_degs = list(self.node_if.get_param('crosshair_offset_degs'))
+
+      if self.auto_process_if is not None:
+        self.auto_process_if.init()
+      if self.scan_process_if is not None:
+        self.scan_process_if.init()
+      if self.track_process_if is not None:
+        self.track_process_if.init()
+      if self.stab_process_if is not None:
+        self.stab_process_if.init()
+
     if do_updates == True:
       pass
     self.publish_status()
