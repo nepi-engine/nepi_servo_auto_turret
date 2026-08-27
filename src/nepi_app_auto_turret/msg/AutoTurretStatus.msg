@@ -32,6 +32,11 @@ bool navpose_connected
 nepi_interfaces/NavPoseStatus navpose_status_msg
 
 ###############################
+# The auto process is the supervisor: it owns the pan/tilt control loop that
+# the scan, track and stabilize modes select between. Nothing auto-drives an
+# axis unless auto is enabled.
+bool auto_ready
+bool auto_enabled
 string auto_process_namespace
 
 bool scanning_ready

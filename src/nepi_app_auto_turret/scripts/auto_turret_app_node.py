@@ -79,6 +79,39 @@ PROCESS_NAME = 'auto_turret'
 PROCESS_GROUP = 'AUTOMATION'
 PROCESS_DESCRIPTION = 'Pan tilt turret automation process'
 
+# The four processes this node owns, keyed by the short name used everywhere
+# below: the enable param, the status fields, and the ProcessIF instance.
+#
+# 'auto' is the supervisor. It is the nepi_auto_pt.pt_auto_2 controller, which
+# owns the pan/tilt loop; the other three are the mode selectors that controller
+# chooses between. That is the controller's own model, not a layer invented
+# here -- see the MODE MODEL block in pt_auto_2: STAB beats TRACK beats SCAN
+# beats HOLD, and STAB forces SCAN and TRACK off. So scanning and tracking are
+# not mutually exclusive with each other (the controller picks TRACK when a
+# fresh detection exists and falls back to SCAN when one does not), but
+# enabling stabilize clears both.
+AUTO_PROCESS = 'auto'
+SCAN_PROCESS = 'scan'
+TRACK_PROCESS = 'track'
+STAB_PROCESS = 'stab'
+PROCESS_KEYS = [AUTO_PROCESS, SCAN_PROCESS, TRACK_PROCESS, STAB_PROCESS]
+
+# The mode processes, in the controller's own priority order. Enabling one
+# clears every mode listed after it that the controller would force off.
+MODE_PROCESS_KEYS = [STAB_PROCESS, TRACK_PROCESS, SCAN_PROCESS]
+
+# Enabling stabilize forces scanning and tracking off, because pt_auto_2 writes
+# that back into the data dict anyway. Doing it here keeps the reported state
+# from disagreeing with what the controller will do.
+PROCESS_CLEARS = {
+    STAB_PROCESS: [TRACK_PROCESS, SCAN_PROCESS]
+}
+
+# Until the pt_auto_2 loop is wired to a live auto_data_dict, an enabled process
+# is enabled and not running, and says so. Reporting running = enabled here
+# would put a green Running indicator on a loop that does not exist.
+PROCESS_NOT_RUNNING_MSG = 'Enabled. Control loop not yet wired; no axis is driven.'
+
 
 class NepiAutoTurretApp(object):
 
@@ -135,6 +168,7 @@ class NepiAutoTurretApp(object):
   max_process_rate_hz = 10.0
   max_image_pub_rate_hz = 10.0
 
+  auto_enabled = False
   auto_process_name = 'process_auto'
   auto_process_namespace = ''
   auto_process_if = None
@@ -244,6 +278,10 @@ class NepiAutoTurretApp(object):
     # Source selection is NOT persisted here. Each Connect*IF registers and
     # restores its own selected_topic param under its own connect namespace.
     self.PARAMS_DICT = {
+        'auto_enabled': {
+            'namespace': self.node_namespace,
+            'factory_val': self.auto_enabled
+        },
         'scanning_enabled': {
             'namespace': self.node_namespace,
             'factory_val': self.scanning_enabled
@@ -453,6 +491,14 @@ class NepiAutoTurretApp(object):
         #####################
         ### Auto modes
         #####################
+        'set_auto_enable': {
+            'namespace': self.node_namespace,
+            'topic': 'set_auto_enable',
+            'msg': Bool,
+            'qsize': 1,
+            'callback': self.setAutoEnableCb,
+            'callback_args': ()
+        },
         'set_scanning_enable': {
             'namespace': self.node_namespace,
             'topic': 'set_scanning_enable',
@@ -621,61 +667,78 @@ class NepiAutoTurretApp(object):
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
 
     ##############################
+    # One ProcessIF per process. Each gets has_enable = True and its own enable
+    # callback, so the process panel's Enable toggle and this node's own
+    # set_<mode>_enable topic land on the same setProcessEnable() path and can
+    # never report different states. Every callback binds the process key rather
+    # than closing over a loop variable.
     self.auto_process_if = ProcessIF(process_name = self.auto_process_name,
                 process_group = self.node_name,
-                process_description = self.auto_process_name,
+                process_description = 'Pan tilt auto control supervisor',
                 process_data_dict = self.auto_process_data,
                 process_controls_dict = self.auto_process_controls,
                 process_status_msg = None,
                 show_controls = True,
                 show_data = True,
+                has_enable = True,
+                enabled = self.auto_enabled,
+                enableCb = self.autoEnableCb,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
                 node_if = self.node_if
-    )  
+    )
 
     self.scan_process_if = ProcessIF(process_name = self.scan_process_name,
                 process_group = self.node_name,
-                process_description = self.scan_process_name,
+                process_description = 'Pan tilt scan mode',
                 process_data_dict = self.scan_process_data,
                 process_controls_dict = self.scan_process_controls,
                 process_status_msg = None,
                 show_controls = True,
                 show_data = True,
+                has_enable = True,
+                enabled = self.scanning_enabled,
+                enableCb = self.scanEnableCb,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
                 node_if = self.node_if
-    )  
+    )
 
     self.track_process_if = ProcessIF(process_name = self.track_process_name,
                 process_group = self.node_name,
-                process_description = self.track_process_name,
+                process_description = 'Pan tilt track mode',
                 process_data_dict = self.track_process_data,
                 process_controls_dict = self.track_process_controls,
                 process_status_msg = None,
                 show_controls = True,
                 show_data = True,
+                has_enable = True,
+                enabled = self.tracking_enabled,
+                enableCb = self.trackEnableCb,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
                 node_if = self.node_if
-    )  
+    )
 
     self.stab_process_if = ProcessIF(process_name = self.stab_process_name,
                 process_group = self.node_name,
-                process_description = self.stab_process_name,
+                process_description = 'Pan tilt stabilize mode',
                 process_data_dict = self.stab_process_data,
                 process_controls_dict = self.stab_process_controls,
                 process_status_msg = None,
                 show_controls = True,
                 show_data = True,
+                has_enable = True,
+                enabled = self.stabilize_enabled,
+                enableCb = self.stabEnableCb,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
                 node_if = self.node_if
-    )  
+    )
 
 
     ##############################
@@ -743,11 +806,16 @@ class NepiAutoTurretApp(object):
     self.navpose_connected = self.checkConnected(self.navpose_connect_if)
     # self.pushSpeedRatios()
 
+    # Readiness follows the source connections, which move on their own. A
+    # process that was enabled while ready and is no longer ready is dropped
+    # here rather than left reporting an enable nothing can act on.
+    self.auditProcessEnables()
+
     cur_time = nepi_utils.get_time()
     elapsed = cur_time - self.last_targets_time
     if elapsed > self.WATCHDOG_TARGETS_TIMEOUT:
         self.targets_lock.acquire()
-        self.targets_dict_list = None
+        self.targets_dict_list = []
         self.targets_lock.release()
 
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
@@ -795,15 +863,13 @@ class NepiAutoTurretApp(object):
   def targetsCb(self, targets_dict_list):
     #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict_list), throttle_s = 5)
     self.last_targets_time = nepi_utils.get_time()
-    self.targets_dict_list = targets_dict_list 
-    for target_dict in self.targets_dict_list:
-        if target_dict is not None:
-            self.targets_lock.acquire()
-            self.targets_dict_list.append(target_dict)
-            self.targets_lock.release()
-        #self.msg_if.pub_warn("Added target list for name " + str(target_dict['target_name']))
-        
-   
+    if targets_dict_list is None:
+      targets_dict_list = []
+    targets = [t for t in targets_dict_list if t is not None]
+    self.targets_lock.acquire()
+    self.targets_dict_list = targets
+    self.targets_lock.release()
+
 
 
 
@@ -981,42 +1047,221 @@ class NepiAutoTurretApp(object):
   # Auto Mode Callbacks
   ###############################
 
-  # The three enables below store and report only. The controller they would
-  # drive lives in nepi_auto_pt.pt_auto_2, but nothing in this node builds the
+  # Two entry points reach the same state. This node's own set_<mode>_enable
+  # topics are what the app panel toggles publish to; each ProcessIF also
+  # advertises <process namespace>/set_enable, which is what the generic process
+  # panel's Enable toggle publishes to. Both funnel through setProcessEnable so
+  # the app status and the four ProcessStatus messages cannot disagree.
+  #
+  # What an enable actually does today: it sets the mode flags that
+  # nepi_auto_pt.pt_auto_2 reads, and it hands the axes to auto control. The
+  # controller loop itself is not wired yet -- nothing in this node builds the
   # auto_data_dict it needs (navpose feed, mount transforms, per-axis servo
-  # state, the control loop), so an enabled mode moves no axis. The toggle
-  # still round-trips and still gates pan_control_disabled / tilt_control_disabled,
-  # which is what the RUI reads.
+  # state) -- so an enabled process reports enabled and NOT running, with
+  # PROCESS_NOT_RUNNING_MSG saying why. Wiring the loop is what flips running.
+
+  def setAutoEnableCb(self, msg):
+    self.setProcessEnable(AUTO_PROCESS, msg.data)
 
   def setScanningEnableCb(self, msg):
-    enabled = msg.data
-    if enabled == True and self.getScanningReady() == False:
-      self.msg_if.pub_warn("Scanning not ready; ignoring enable")
-      return
-    self.msg_if.pub_info("Setting scanning enable to: " + str(enabled))
-    self.scanning_enabled = enabled
-    self.setParam('scanning_enabled', enabled)
-    self.publish_status()
+    self.setProcessEnable(SCAN_PROCESS, msg.data)
 
   def setTrackingEnableCb(self, msg):
-    enabled = msg.data
-    if enabled == True and self.getTrackingReady() == False:
-      self.msg_if.pub_warn("Tracking not ready; ignoring enable")
-      return
-    self.msg_if.pub_info("Setting tracking enable to: " + str(enabled))
-    self.tracking_enabled = enabled
-    self.setParam('tracking_enabled', enabled)
-    self.publish_status()
+    self.setProcessEnable(TRACK_PROCESS, msg.data)
 
   def setStabilizeEnableCb(self, msg):
-    enabled = msg.data
-    if enabled == True and self.getStabilizeReady() == False:
-      self.msg_if.pub_warn("Stabilize not ready; ignoring enable")
+    self.setProcessEnable(STAB_PROCESS, msg.data)
+
+  # The four ProcessIF enable callbacks. Each returns the state actually
+  # adopted, which is what the process panel then reports -- an enable that was
+  # refused falls the toggle back instead of leaving it green.
+  def autoEnableCb(self, enabled):
+    return self.setProcessEnable(AUTO_PROCESS, enabled)
+
+  def scanEnableCb(self, enabled):
+    return self.setProcessEnable(SCAN_PROCESS, enabled)
+
+  def trackEnableCb(self, enabled):
+    return self.setProcessEnable(TRACK_PROCESS, enabled)
+
+  def stabEnableCb(self, enabled):
+    return self.setProcessEnable(STAB_PROCESS, enabled)
+
+  def getProcessIf(self, process_key):
+    return {
+        AUTO_PROCESS: self.auto_process_if,
+        SCAN_PROCESS: self.scan_process_if,
+        TRACK_PROCESS: self.track_process_if,
+        STAB_PROCESS: self.stab_process_if
+    }.get(process_key, None)
+
+  def getProcessParamName(self, process_key):
+    return {
+        AUTO_PROCESS: 'auto_enabled',
+        SCAN_PROCESS: 'scanning_enabled',
+        TRACK_PROCESS: 'tracking_enabled',
+        STAB_PROCESS: 'stabilize_enabled'
+    }.get(process_key, None)
+
+  def getProcessEnabled(self, process_key):
+    return {
+        AUTO_PROCESS: self.auto_enabled,
+        SCAN_PROCESS: self.scanning_enabled,
+        TRACK_PROCESS: self.tracking_enabled,
+        STAB_PROCESS: self.stabilize_enabled
+    }.get(process_key, False)
+
+  def getProcessReady(self, process_key):
+    # Every mode needs the supervisor: a mode flag means nothing to a controller
+    # that is not enabled, so a mode is not ready unless auto is ready too.
+    if process_key == AUTO_PROCESS:
+      return self.getAutoReady()
+    if self.getAutoReady() == False:
+      return False
+    return {
+        SCAN_PROCESS: self.getScanningReady,
+        TRACK_PROCESS: self.getTrackingReady,
+        STAB_PROCESS: self.getStabilizeReady
+    }.get(process_key, lambda: False)()
+
+  def storeProcessEnabled(self, process_key, enabled):
+    if process_key == AUTO_PROCESS:
+      self.auto_enabled = enabled
+    elif process_key == SCAN_PROCESS:
+      self.scanning_enabled = enabled
+    elif process_key == TRACK_PROCESS:
+      self.tracking_enabled = enabled
+    elif process_key == STAB_PROCESS:
+      self.stabilize_enabled = enabled
+    else:
       return
-    self.msg_if.pub_info("Setting stabilize enable to: " + str(enabled))
-    self.stabilize_enabled = enabled
-    self.setParam('stabilize_enabled', enabled)
+    param_name = self.getProcessParamName(process_key)
+    if param_name is not None:
+      self.setParam(param_name, enabled)
+    process_if = self.getProcessIf(process_key)
+    if process_if is not None:
+      # set_process_enable_state, not set_process_enable: the decision is
+      # already made here, and going back through the IF's own setter would
+      # re-enter this method through the enable callback.
+      process_if.set_process_enable_state(enabled)
+
+  def setProcessEnable(self, process_key, enabled):
+    enabled = (enabled == True)
+    if process_key not in PROCESS_KEYS:
+      self.msg_if.pub_warn("Unknown process: " + str(process_key))
+      return False
+
+    if enabled == True and self.getProcessReady(process_key) == False:
+      self.msg_if.pub_warn("Process not ready; ignoring enable: " + str(process_key))
+      # Re-report so a toggle that was clicked optimistically falls back.
+      self.publishProcessRunStates()
+      self.publish_status()
+      return False
+
+    self.msg_if.pub_info("Setting process enable: " + str(process_key) + " to: " + str(enabled))
+    self.storeProcessEnabled(process_key, enabled)
+
+    if enabled == True:
+      # pt_auto_2 forces the lower-priority modes off anyway and writes that
+      # back; clearing them here keeps the reported state from disagreeing.
+      for cleared_key in PROCESS_CLEARS.get(process_key, []):
+        if self.getProcessEnabled(cleared_key) == True:
+          self.msg_if.pub_info("Clearing process, superseded by " + str(process_key) + ": " + str(cleared_key))
+          self.storeProcessEnabled(cleared_key, False)
+    elif process_key == AUTO_PROCESS:
+      # Dropping the supervisor drops every mode with it. Leaving a mode
+      # enabled under a disabled supervisor reports an armed state that
+      # nothing can act on.
+      for mode_key in MODE_PROCESS_KEYS:
+        if self.getProcessEnabled(mode_key) == True:
+          self.msg_if.pub_info("Clearing process, auto supervisor disabled: " + str(mode_key))
+          self.storeProcessEnabled(mode_key, False)
+
+    self.applyAxisOwnership()
+    self.publishProcessRunStates()
     self.publish_status()
+    return self.getProcessEnabled(process_key)
+
+  def getAutoModeActive(self):
+    if self.auto_enabled == False:
+      return False
+    for mode_key in MODE_PROCESS_KEYS:
+      if self.getProcessEnabled(mode_key) == True:
+        return True
+    return False
+
+  def applyAxisOwnership(self):
+    # An axis is auto-owned only while the supervisor is enabled AND some mode
+    # is selected; otherwise it goes back to manual. These four flags are what
+    # gate every manual pan/tilt command in this node and what the RUI reads to
+    # grey out its sliders, so they are the whole visible effect of an enable
+    # until the control loop is wired.
+    auto_active = self.getAutoModeActive()
+    was_auto = (self.pan_control_auto_enabled or self.tilt_control_auto_enabled)
+
+    self.pan_control_auto_enabled = auto_active
+    self.tilt_control_auto_enabled = auto_active
+    self.pan_control_manaul_enabled = (auto_active == False)
+    self.tilt_control_manaul_enabled = (auto_active == False)
+
+    if auto_active == False and was_auto == True:
+      # Releasing the axes without stopping would leave the device running out
+      # the last auto command with nothing driving it.
+      self.stopPanTilt()
+
+  def stopPanTilt(self):
+    if self.pantilt_connected == False or self.pantilt_connect_if is None:
+      return
+    try:
+      self.pantilt_connect_if.stop_moving()
+    except Exception as e:
+      self.msg_if.pub_warn("Failed to stop pan tilt motion: " + str(e))
+    self.pan_goto = UNSET_VALUE
+    self.tilt_goto = UNSET_VALUE
+
+  def publishProcessRunStates(self):
+    # running is what is actually executing, which is not the same as enabled.
+    # Until the pt_auto_2 loop is wired, nothing runs, and each enabled process
+    # says so rather than showing a green Running indicator for a loop that
+    # does not exist. Wiring the loop is what makes getProcessRunning return
+    # something other than False.
+    for process_key in PROCESS_KEYS:
+      process_if = self.getProcessIf(process_key)
+      if process_if is None:
+        continue
+      enabled = self.getProcessEnabled(process_key)
+      running = self.getProcessRunning(process_key)
+      if running == True:
+        msg_str = ''
+      elif enabled == True:
+        msg_str = PROCESS_NOT_RUNNING_MSG
+      elif self.getProcessReady(process_key) == False:
+        msg_str = 'Not ready. Required source not connected.'
+      else:
+        msg_str = ''
+      process_if.set_process_running(running, msg_str = msg_str)
+
+  def getProcessRunning(self, process_key):
+    # No control loop is wired yet, so nothing runs. This is the single place
+    # to change when nepi_auto_pt.pt_auto_2 is driven from processCb.
+    return False
+
+  def auditProcessEnables(self):
+    # Auto first: dropping the supervisor clears the modes in the same pass, so
+    # auditing it first avoids reporting a mode as independently lost.
+    dropped = False
+    for process_key in PROCESS_KEYS:
+      if self.getProcessEnabled(process_key) == False:
+        continue
+      if self.getProcessReady(process_key) == True:
+        continue
+      self.msg_if.pub_warn("Process no longer ready; disabling: " + str(process_key))
+      self.setProcessEnable(process_key, False)
+      dropped = True
+    if dropped == False:
+      # setProcessEnable already did both on the drop path.
+      self.applyAxisOwnership()
+      self.publishProcessRunStates()
 
   ###############################
   # Overlay Control Callbacks
@@ -1083,6 +1328,11 @@ class NepiAutoTurretApp(object):
       return ''
     return status_msg.navpose_topic
 
+  def getAutoReady(self):
+    # The supervisor needs the device it controls and nothing else. The modes
+    # layer their own extra requirements on top of this.
+    return self.pantilt_connected == True and self.pantilt_connect_if is not None
+
   def getScanningReady(self):
     if self.pantilt_connected == False or self.pantilt_connect_if is None:
       return False
@@ -1118,6 +1368,7 @@ class NepiAutoTurretApp(object):
   def initCb(self, do_updates = False):
     if self.node_if is not None:
       # Selected sources are restored by each connector from its own param.
+      self.auto_enabled = self.node_if.get_param('auto_enabled')
       self.scanning_enabled = self.node_if.get_param('scanning_enabled')
       self.tracking_enabled = self.node_if.get_param('tracking_enabled')
       self.stabilize_enabled = self.node_if.get_param('stabilize_enabled')
@@ -1133,14 +1384,18 @@ class NepiAutoTurretApp(object):
       self.show_crosshair_enabled = self.node_if.get_param('show_crosshair_enabled')
       self.crosshair_offset_degs = list(self.node_if.get_param('crosshair_offset_degs'))
 
+      # The ProcessIFs come up before the params are restored, so each one is
+      # told the restored enable state here. This node owns that state; the
+      # interfaces only report it.
+      for process_key in PROCESS_KEYS:
+        process_if = self.getProcessIf(process_key)
+        if process_if is not None:
+          process_if.init()
+          process_if.set_process_enable_state(self.getProcessEnabled(process_key))
+
       if self.auto_process_if is not None:
-        self.auto_process_if.init()
-      if self.scan_process_if is not None:
-        self.scan_process_if.init()
-      if self.track_process_if is not None:
-        self.track_process_if.init()
-      if self.stab_process_if is not None:
-        self.stab_process_if.init()
+        self.applyAxisOwnership()
+        self.publishProcessRunStates()
 
     if do_updates == True:
       pass
@@ -1180,7 +1435,7 @@ class NepiAutoTurretApp(object):
 
 
     #####################
-    if len(targets_dict_list) > 0:
+    if targets_dict_list is not None and len(targets_dict_list) > 0:
       track_dict = targets_dict_list[0]
     # if len(targets_dict_list) == 0 or self.track_process_if is None:
     #   return
@@ -1216,7 +1471,10 @@ class NepiAutoTurretApp(object):
       max_hz = 1
     process_delay = (float(1) / max_hz) - (nepi_utils.get_time() - start_time)
     next_process_delay = max(0.01, process_delay)
-    nepi_sdk.start_timer_process(next_process_delay, self.updaterCb, oneshot = True)
+    # Re-arm this loop, not updaterCb. Re-arming the updater here ran the
+    # process body exactly once and then drove the 1 Hz updater at the process
+    # rate instead.
+    nepi_sdk.start_timer_process(next_process_delay, self.processCb, oneshot = True)
 
 
   ###################
@@ -1293,19 +1551,21 @@ class NepiAutoTurretApp(object):
     self.status_msg.navpose_connected = self.navpose_connected
     self.status_msg.navpose_status_msg = navpose_status_msg
 
+    self.status_msg.auto_ready = self.getAutoReady()
+    self.status_msg.auto_enabled = self.auto_enabled
     self.status_msg.auto_process_namespace = self.auto_process_namespace
 
-    self.status_msg.scanning_ready = self.getScanningReady()
+    self.status_msg.scanning_ready = self.getProcessReady(SCAN_PROCESS)
     self.status_msg.scanning_enabled = self.scanning_enabled
     self.status_msg.scan_process_namespace = self.scan_process_namespace
 
 
-    self.status_msg.tracking_ready = self.getTrackingReady()
+    self.status_msg.tracking_ready = self.getProcessReady(TRACK_PROCESS)
     self.status_msg.tracking_enabled = self.tracking_enabled
     self.status_msg.track_process_namespace = self.track_process_namespace
 
 
-    self.status_msg.stabilize_ready = self.getStabilizeReady()
+    self.status_msg.stabilize_ready = self.getProcessReady(STAB_PROCESS)
     self.status_msg.stabilize_enabled = self.stabilize_enabled
     self.status_msg.stab_process_namespace = self.stab_process_namespace
 

@@ -59,10 +59,15 @@ function round(value, decimals = 0) {
 //
 // This page binds to ONE app node, not to a manager list. The status topic is
 // <app>/status carrying nepi_app_auto_turret/AutoTurretStatus, and every command
-// topic hangs off the app namespace. The algorithm's own controls are rendered by
-// the shared Nepi_IF_ConnectProcess against status_msg.controls_topic -- a field
-// AutoTurretStatus does not yet define, so that block falls back to <app>/controls
-// and stays empty until either the field or a ControlsIF is added.
+// topic hangs off the app namespace.
+//
+// The node owns four processes -- auto, scan, track and stab -- and reports a
+// namespace for each in status_msg.<name>_process_namespace. The Controls block
+// at the bottom renders one shared Nepi_IF_ConnectProcess per process against
+// those namespaces, with show_enable off: the four Enable toggles in the panel
+// above are this page's own, and both they and the process panels drive the
+// same state in the node, so showing two toggles per process would only invite
+// them to look out of sync.
 class NepiAppAutoTurret extends Component {
 
   constructor(props) {
@@ -273,6 +278,9 @@ class NepiAppAutoTurret extends Component {
     const pantilt_connected = status_msg.pantilt_connected
     
 
+    const auto_ready = status_msg.auto_ready
+    const auto_enabled = status_msg.auto_enabled
+
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
 
@@ -399,9 +407,21 @@ class NepiAppAutoTurret extends Component {
           <Columns>
           <Column>
 
+            {/* Enable Auto is the supervisor switch, so it comes first and the
+                three mode enables sit under it. A mode is only ready while auto
+                is ready, and the node clears every mode when auto goes off, so
+                turning auto off greys and drops the three below it. */}
+            <Label title="Enable Auto">
+              <AsyncToggle
+                disabled={auto_ready === false}
+                checked={auto_enabled === true}
+                onClick={() => sendBoolMsg(process_namespace + "/set_auto_enable", !auto_enabled)}>
+              </AsyncToggle>
+            </Label>
+
             <Label title="Enable Scanning">
               <AsyncToggle
-                disabled={scanning_ready == false}
+                disabled={scanning_ready === false}
                 checked={scanning_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_scanning_enable", !scanning_enabled)}>
               </AsyncToggle>
@@ -409,7 +429,7 @@ class NepiAppAutoTurret extends Component {
 
             <Label title="Enable Tracking">
               <AsyncToggle
-                disabled={tracking_ready == false}
+                disabled={tracking_ready === false}
                 checked={tracking_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_tracking_enable", !tracking_enabled)}>
               </AsyncToggle>
@@ -418,7 +438,7 @@ class NepiAppAutoTurret extends Component {
 
             <Label title="Enable Stabilize">
               <AsyncToggle
-                disabled={stabilize_ready == false}
+                disabled={stabilize_ready === false}
                 checked={stabilize_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
               </AsyncToggle>
@@ -1162,6 +1182,7 @@ class NepiAppAutoTurret extends Component {
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
+        show_enable={false}
         namespace={ status_msg.scan_process_namespace}
         />
         : null}
@@ -1171,6 +1192,7 @@ class NepiAppAutoTurret extends Component {
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
+        show_enable={false}
         namespace={ status_msg.track_process_namespace}
         />
         : null}
@@ -1179,6 +1201,7 @@ class NepiAppAutoTurret extends Component {
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
+        show_enable={false}
         namespace={ status_msg.stab_process_namespace}
         />
         : null}
@@ -1220,6 +1243,7 @@ class NepiAppAutoTurret extends Component {
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
+        show_enable={false}
         namespace={ status_msg.auto_process_namespace}
         />
         : null}
