@@ -860,16 +860,19 @@ class NepiAutoTurretApp(object):
   def stopTiltCb(self):
     self.tilt_goto = UNSET_VALUE
 
-  def targetsCb(self, targets_dict_list):
-    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict_list), throttle_s = 5)
+  def targetsCb(self, targets_dict):
+    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict), throttle_s = 5)
     self.last_targets_time = nepi_utils.get_time()
-    if targets_dict_list is None:
-      targets_dict_list = []
-    targets = [t for t in targets_dict_list if t is not None]
+    targets = targets_dict['data']['targets']
+    # Normalized to a list here so the targets watchdog in updaterCb and the
+    # consumers in processCb can treat targets_dict_list as a list without
+    # re-checking. The earlier version of this callback appended to the same
+    # list it was iterating, which never terminated.
+    if targets is None:
+      targets = []
     self.targets_lock.acquire()
-    self.targets_dict_list = targets
+    self.targets_dict_list = [t for t in targets if t is not None]
     self.targets_lock.release()
-
 
 
 
@@ -1464,6 +1467,7 @@ class NepiAutoTurretApp(object):
       track_msg.source_timestamp = nepi_utils.get_time()
       target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
       track_msg.target = target_msg
+      self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
       self.node_if.publish_pub('track_pub', track_msg)
     
     max_hz = self.max_process_rate_hz
