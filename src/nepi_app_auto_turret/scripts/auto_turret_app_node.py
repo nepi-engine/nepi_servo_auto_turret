@@ -35,9 +35,11 @@ from nepi_app_auto_turret.msg import AutoTurretStatus
 
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
+from nepi_sdk import nepi_targets
 from nepi_sdk import nepi_targets_track
 from nepi_sdk import nepi_controls
 from nepi_sdk import nepi_data
+
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
@@ -72,6 +74,7 @@ PKG_NAME = 'nepi_app_auto_turret'
 # so the selected one is rebuilt through nepi_sdk.convert_dict2msg.
 TARGET_MSG_TYPE = 'nepi_interfaces/Target'
 
+
 PROCESS_NAME = 'auto_turret'
 PROCESS_GROUP = 'AUTOMATION'
 PROCESS_DESCRIPTION = 'Pan tilt turret automation process'
@@ -84,11 +87,16 @@ class NepiAutoTurretApp(object):
 
   DEFAULT_NODE_NAME = "app_auto_turret"  # Can be overwritten by launch command
 
+  WATCHDOG_TARGETS_TIMEOUT = 1
+
   node_if = None
   save_data_if = None
 
   data_products = [IMG_PUB_DATA_PRODUCT]
 
+  status_msg = AutoTurretStatus()
+
+    
   # Source connections. Each Connect*IF owns one selector row end to end:
   # discovery into available_topics, selected_topic with its own persisted param,
   # a select_topic subscriber, check_connection(), and a ConnectIFStatus published
@@ -166,8 +174,9 @@ class NepiAutoTurretApp(object):
   img_pub_node_name = None
   img_pub_topic = 'None'
 
-  tracking_dict = None
-  status_lock = threading.Lock()
+  last_targets_time = 0
+  targets_dict_list = None
+  targets_lock = threading.Lock()
 
   def __init__(self):
     #### APP NODE INIT SETUP ####
@@ -185,6 +194,9 @@ class NepiAutoTurretApp(object):
     ##############################
     # Initialize Class Variables
    
+    self.status_msg.node_name = self.node_name
+    self.status_msg.namespace = self.node_namespace
+
 
 
     self.auto_process_namespace = self.node_namespace + '/' + self.auto_process_name
@@ -321,38 +333,6 @@ class NepiAutoTurretApp(object):
         # generic aliases stay because process_status advertises
         # available_source_topics; they forward to the IDX connector, which is
         # this app's one data source.
-        'add_source_topic': {
-            'namespace': self.node_namespace,
-            'topic': 'add_source_topic',
-            'msg': String,
-            'qsize': 1,
-            'callback': self.addSourceTopicCb,
-            'callback_args': ()
-        },
-        'remove_source_topic': {
-            'namespace': self.node_namespace,
-            'topic': 'remove_source_topic',
-            'msg': String,
-            'qsize': 1,
-            'callback': self.removeSourceTopicCb,
-            'callback_args': ()
-        },
-        'add_source_topics': {
-            'namespace': self.node_namespace,
-            'topic': 'add_source_topics',
-            'msg': StringArray,
-            'qsize': 1,
-            'callback': self.addSourceTopicsCb,
-            'callback_args': ()
-        },
-        'remove_source_topics': {
-            'namespace': self.node_namespace,
-            'topic': 'remove_source_topics',
-            'msg': StringArray,
-            'qsize': 1,
-            'callback': self.removeSourceTopicsCb,
-            'callback_args': ()
-        },
         'set_auto_select_enable': {
             'namespace': self.node_namespace,
             'topic': 'set_auto_select_enable',
@@ -572,6 +552,9 @@ class NepiAutoTurretApp(object):
                     # node_if = self.node_if
                     )
 
+    self.status_msg.data_products = self.data_products
+    self.status_msg.save_data_topic = nepi_sdk.create_namespace(self.node_namespace, 'save_data')
+
     ###############################
     # Create Source Connect IFs
     #
@@ -605,7 +588,7 @@ class NepiAutoTurretApp(object):
 
     self.targets_connect_if = ConnectTargetsIF(
                                     auto_select_enabled = self.auto_select_enabled,
-                                    dataCB = self.targetsDataCb,
+                                    dataCB = self.targetsCb,
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
@@ -707,6 +690,7 @@ class NepiAutoTurretApp(object):
     nepi_sdk.sleep(1)
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
     nepi_sdk.start_timer_process(float(1) / STATUS_PUBLISH_RATE_HZ, self.statusPublishCb)
+    nepi_sdk.start_timer_process(1, self.processCb, oneshot = True)
     nepi_sdk.on_shutdown(self.shutdownCb)
 
     #########################################################
@@ -757,7 +741,15 @@ class NepiAutoTurretApp(object):
     self.image_connected = self.checkConnected(self.image_connect_if)
     self.targets_connected = self.checkConnected(self.targets_connect_if)
     self.navpose_connected = self.checkConnected(self.navpose_connect_if)
-    self.pushSpeedRatios()
+    # self.pushSpeedRatios()
+
+    cur_time = nepi_utils.get_time()
+    elapsed = cur_time - self.last_targets_time
+    if elapsed > self.WATCHDOG_TARGETS_TIMEOUT:
+        self.targets_lock.acquire()
+        self.targets_dict_list = None
+        self.targets_lock.release()
+
     nepi_sdk.start_timer_process(float(1) / UPDATER_RATE_HZ, self.updaterCb, oneshot = True)
 
   def checkConnected(self, connect_if):
@@ -777,19 +769,19 @@ class NepiAutoTurretApp(object):
       return 'None'
     return topic
 
-  def pushSpeedRatios(self):
-    # A newly connected device knows nothing of the ratios this node restored
-    # from config, so push them once per connection rather than every cycle.
-    if self.pantilt_connected == False:
-      self.last_speed_ratios_pushed = None
-      return
-    ratios = [self.speed_ratio, self.pan_speed_ratio, self.tilt_speed_ratio]
-    if ratios == self.last_speed_ratios_pushed:
-      return
-    self.pantilt_connect_if.set_speed_ratio(self.speed_ratio)
-    self.pantilt_connect_if.set_pan_speed_ratio(self.pan_speed_ratio)
-    self.pantilt_connect_if.set_tilt_speed_ratio(self.tilt_speed_ratio)
-    self.last_speed_ratios_pushed = ratios
+  # def pushSpeedRatios(self):
+  #   # A newly connected device knows nothing of the ratios this node restored
+  #   # from config, so push them once per connection rather than every cycle.
+  #   if self.pantilt_connected == False:
+  #     self.last_speed_ratios_pushed = None
+  #     return
+  #   ratios = [self.speed_ratio, self.pan_speed_ratio, self.tilt_speed_ratio]
+  #   if ratios == self.last_speed_ratios_pushed:
+  #     return
+  #   self.pantilt_connect_if.set_speed_ratio(self.speed_ratio)
+  #   self.pantilt_connect_if.set_pan_speed_ratio(self.pan_speed_ratio)
+  #   self.pantilt_connect_if.set_tilt_speed_ratio(self.tilt_speed_ratio)
+  #   self.last_speed_ratios_pushed = ratios
 
   def panTiltCb(self, pan_deg, tilt_deg):
     self.pt_position = [pan_deg, tilt_deg]
@@ -800,85 +792,28 @@ class NepiAutoTurretApp(object):
   def stopTiltCb(self):
     self.tilt_goto = UNSET_VALUE
 
-  def targetsDataCb(self, data_dict):
-    # ConnectTargetsIF hands over an already-converted dict, not the Targets msg
-    # (connect_targets_if.py:434). That suits get_best_from_targets, which works
-    # on dicts anyway; only the winner is rebuilt into a Target msg for Track.
-    #
-    # The child image publisher node draws its own target boxes straight off
-    # <image topic>/targets. What it cannot do is pick the tracked one, so that
-    # selection happens here and goes out on <node>/track.
-    if self.tracking_enabled == False:
-      return
-    if self.node_if is None:
-      return
-    data = data_dict.get('data', None)
-    if data is None:
-      return
-    targets_dict_list = data.get('targets', [])
-    if len(targets_dict_list) == 0:
-      return
-    [best_target, tracking_dict] = nepi_targets_track.get_best_from_targets(
-                                        targets_dict_list,
-                                        tracking_dict = self.tracking_dict)
-    self.tracking_dict = tracking_dict
-    if best_target is None:
-      return
-    try:
-      target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, best_target)
-    except Exception as e:
-      self.msg_if.pub_warn("Failed to rebuild target message: " + str(e))
-      return
-    if target_msg is None:
-      return
-    track_msg = Track()
-    track_msg.timestamp = nepi_utils.get_time()
-    track_msg.process_name = PROCESS_NAME
-    track_msg.process_namespace = self.node_namespace
-    track_msg.source_topic = data.get('source_topic', '')
-    track_msg.source_timestamp = data.get('source_timestamp', 0.0)
-    track_msg.target = target_msg
-    self.node_if.publish_pub('track_pub', track_msg)
+  def targetsCb(self, msg):
+    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(msg))
+    self.last_targets_time = nepi_utils.get_time()
+    self.targets_msg = msg.targets
+    timestamp = msg.source_timestamp
+    if timestamp is None or timestamp <= 0.0:
+        # Detector left source_timestamp unset -> use arrival time so the
+        # state-buffer resolve gets a positive query on the feeders' clock.
+        timestamp = nepi_utils.get_time()
+      
+    targets_dict_list = []
+    for target_msg in self.targets_msg:
+        target_dict = nepi_targets.convert_target_msg2dict(target_msg)
+        if target_dict is not None:
+            self.targets_lock.acquire()
+            self.targets_dict_list.append(target_dict)
+            self.targets_lock.release()
+        #self.msg_if.pub_warn("Added target list for name " + str(target_dict['target_name']))
+        
+   
 
-  ###############################
-  # Source Selection Callbacks
-  ###############################
 
-  # The dedicated selectors live on the connectors, at <node>/idx_connect and
-  # friends. Everything below is the generic process-source alias surface, which
-  # forwards to the IDX connector so both paths cannot disagree about what is
-  # selected. set_selected_topic() rejects a topic that is not in the
-  # connector's own available list, so no membership check is needed here.
-
-  def setImageTopic(self, topic):
-    if self.image_connect_if is None:
-      return
-    self.msg_if.pub_info("Setting image topic to: " + str(topic))
-    self.image_connect_if.set_selected_topic(topic)
-    self.publish_status()
-
-  def addSourceTopicCb(self, msg):
-    self.setImageTopic(msg.data)
-
-  def removeSourceTopicCb(self, msg):
-    if msg.data == self.getSelectedTopic(self.image_connect_if):
-      self.setImageTopic('None')
-
-  def addSourceTopicsCb(self, msg):
-    # This app consumes one image at a time, so an array set takes the first
-    # entry the connector knows about rather than silently dropping the msg.
-    available = []
-    if self.image_connect_if is not None:
-      available = self.image_connect_if.get_available_topics()
-    for topic in msg.array:
-      if topic in available:
-        self.setImageTopic(topic)
-        return
-    self.msg_if.pub_warn("No known image topic in source topics set: " + str(list(msg.array)))
-
-  def removeSourceTopicsCb(self, msg):
-    if self.getSelectedTopic(self.image_connect_if) in msg.array:
-      self.setImageTopic('None')
 
   def setAutoSelectEnableCb(self, msg):
     enabled = msg.data
@@ -1235,39 +1170,85 @@ class NepiAutoTurretApp(object):
       pass
     self.initCb(do_updates = do_updates)
 
+
+
+  ###################
+  ## Auto Process Udpater
+
+  def processCb(self, timer):
+    
+    start_time = nepi_utils.get_time()
+    #####################
+    self.targets_lock.acquire()
+    targets_dict_list = copy.deepcopy(self.targets_dict_list)
+    self.targets_lock.release()
+    track_dict = None 
+
+
+
+
+    #####################
+    if len(targets_dict_list) > 0:
+      track_dict = targets_dict_list[0]
+    # if len(targets_dict_list) == 0 or self.track_process_if is None:
+    #   return
+    # [best_target, tracking_dict] = nepi_targets_track.get_best_from_targets(
+    #                                     targets_dict_list,
+    #                                     tracking_dict = self.tracking_dict)
+    # self.tracking_dict = tracking_dict
+    # if best_target is None:
+    #   return
+    # try:
+    #   target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, best_target)
+    # except Exception as e:
+    #   self.msg_if.pub_warn("Failed to rebuild target message: " + str(e))
+    #   return
+    # if target_msg is None:
+    #   return
+
+
+    #####################
+    if track_dict is not None and self.image_connect_if is not None:
+      track_msg = Track()
+      track_msg.timestamp = nepi_utils.get_time()
+      track_msg.process_name = self.node_name
+      track_msg.process_namespace = self.node_namespace
+      track_msg.source_topic = self.image_connect_if.get_namespace()
+      track_msg.source_timestamp = nepi_utils.get_time()
+      target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
+      track_msg.target = target_msg
+      self.node_if.publish_pub('track_pub', track_msg)
+    
+    max_hz = self.max_process_rate_hz
+    if max_hz < 1:
+      max_hz = 1
+    process_delay = (float(1) / max_hz) - (nepi_utils.get_time() - start_time)
+    next_process_delay = max(0.01, process_delay)
+    nepi_sdk.start_timer_process(next_process_delay, self.updaterCb, oneshot = True)
+
+
   ###################
   ## Status Publishers
 
   def statusPublishCb(self, timer):
-    self.publish_status()
+    self.publish_status(check = False)
 
 
-  def get_status_msg(self):
-    """Build the AutoTurretStatus message from current node state.
+  def publish_status(self, check = True):
+    """Publish the current AutoTurretStatus on the node's status topic.
 
-    Every field of the message is assigned on every call. Numeric fields with
-    no live source report the documented unset sentinel of -999 rather than a
-    fabricated value.
-
-    Returns:
-        nepi_app_auto_turret/AutoTurretStatus: the fully populated status message.
+    Called on the status timer and after every accepted command so the RUI and
+    the child image publisher node both see a change immediately.
     """
+    if self.node_if is None:
+      return
 
+    last_status_msg = copy.deepcopy(self.status_msg)
 
+    self.status_msg.max_process_rate_hz = self.max_process_rate_hz
+    self.status_msg.max_image_pub_rate_hz = self.max_image_pub_rate_hz
 
-    status_msg = AutoTurretStatus()
-
-    status_msg.node_name = self.node_name
-    status_msg.namespace = self.node_namespace
-
-    status_msg.data_products = self.data_products
-    status_msg.save_data_topic = nepi_sdk.create_namespace(self.node_namespace, 'save_data')
-
-    status_msg.max_process_rate_hz = self.max_process_rate_hz
-    status_msg.max_image_pub_rate_hz = self.max_image_pub_rate_hz
-
-    status_msg.auto_select_enabled = self.auto_select_enabled
-
+    self.status_msg.auto_select_enabled = self.auto_select_enabled
 
 
     # Each connect IF is None until its source is selected, so the local has to
@@ -1279,101 +1260,85 @@ class NepiAutoTurretApp(object):
     pantilt_status_msg = None
     if self.pantilt_connect_if is not None:
       self.pantilt_connect_if.set_auto_connect_enable(self.auto_select_enabled)
-      status_msg.selected_pantilt_topic = self.pantilt_connect_if.get_namespace()
+      self.status_msg.selected_pantilt_topic = self.pantilt_connect_if.get_namespace()
       pantilt_status_msg = self.pantilt_connect_if.get_status_msg()
     if pantilt_status_msg is None:
-      status_msg.selected_pantilt_topic = "None"
+      self.status_msg.selected_pantilt_topic = "None"
       pantilt_status_msg = DevicePTXStatus()
-    status_msg.pantilt_connected = self.pantilt_connected
-    status_msg.pantilt_status_msg = pantilt_status_msg
+    self.status_msg.pantilt_connected = self.pantilt_connected
+    self.status_msg.pantilt_status_msg = pantilt_status_msg
 
     image_status_msg = None
     if self.image_connect_if is not None:
       self.image_connect_if.set_auto_connect_enable(self.auto_select_enabled)
-      status_msg.selected_image_topic = self.image_connect_if.get_namespace()
+      self.status_msg.selected_image_topic = self.image_connect_if.get_namespace()
       image_status_msg = self.image_connect_if.get_status_msg()
     if image_status_msg is None:
-      status_msg.selected_image_topic = "None"
+      self.status_msg.selected_image_topic = "None"
       image_status_msg = ImageStatus()
-    status_msg.image_connected = self.image_connected
-    status_msg.image_status_msg = image_status_msg
+    self.status_msg.image_connected = self.image_connected
+    self.status_msg.image_status_msg = image_status_msg
 
     targets_status_msg = None
     if self.targets_connect_if is not None:
       self.targets_connect_if.set_auto_connect_enable(self.auto_select_enabled)
-      status_msg.selected_targets_topic = self.targets_connect_if.get_namespace()
+      self.status_msg.selected_targets_topic = self.targets_connect_if.get_namespace()
       targets_status_msg = self.targets_connect_if.get_status_msg()
     if targets_status_msg is None:
-      status_msg.selected_targets_topic = "None"
+      self.status_msg.selected_targets_topic = "None"
       targets_status_msg = TargetingStatus()
-    status_msg.targets_connected = self.targets_connected
-    status_msg.targets_status_msg = targets_status_msg
+    self.status_msg.targets_connected = self.targets_connected
+    self.status_msg.targets_status_msg = targets_status_msg
 
     navpose_status_msg = None
     if self.navpose_connect_if is not None:
       self.navpose_connect_if.set_auto_connect_enable(self.auto_select_enabled)
-      status_msg.selected_navpose_topic = self.navpose_connect_if.get_namespace()
+      self.status_msg.selected_navpose_topic = self.navpose_connect_if.get_namespace()
       navpose_status_msg = self.navpose_connect_if.get_status_msg()
     if navpose_status_msg is None:
-      status_msg.selected_navpose_topic = "None"
+      self.status_msg.selected_navpose_topic = "None"
       navpose_status_msg = NavPoseStatus()
-    status_msg.navpose_connected = self.navpose_connected
-    status_msg.navpose_status_msg = navpose_status_msg
+    self.status_msg.navpose_connected = self.navpose_connected
+    self.status_msg.navpose_status_msg = navpose_status_msg
+
+    self.status_msg.auto_process_namespace = self.auto_process_namespace
+
+    self.status_msg.scanning_ready = self.getScanningReady()
+    self.status_msg.scanning_enabled = self.scanning_enabled
+    self.status_msg.scan_process_namespace = self.scan_process_namespace
 
 
-    status_msg.auto_process_namespace = self.auto_process_namespace
+    self.status_msg.tracking_ready = self.getTrackingReady()
+    self.status_msg.tracking_enabled = self.tracking_enabled
+    self.status_msg.track_process_namespace = self.track_process_namespace
 
 
-
-    status_msg.scanning_ready = self.getScanningReady()
-    status_msg.scanning_enabled = self.scanning_enabled
-    status_msg.scan_process_namespace = self.scan_process_namespace
-
-
-    status_msg.tracking_ready = self.getTrackingReady()
-    status_msg.tracking_enabled = self.tracking_enabled
-    status_msg.track_process_namespace = self.track_process_namespace
+    self.status_msg.stabilize_ready = self.getStabilizeReady()
+    self.status_msg.stabilize_enabled = self.stabilize_enabled
+    self.status_msg.stab_process_namespace = self.stab_process_namespace
 
 
-    status_msg.stabilize_ready = self.getStabilizeReady()
-    status_msg.stabilize_enabled = self.stabilize_enabled
-    status_msg.stab_process_namespace = self.stab_process_namespace
+    self.status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled
+    self.status_msg.tilt_control_manaul_enabled = self.tilt_control_manaul_enabled
+
+    self.status_msg.pan_control_auto_enabled = self.pan_control_auto_enabled
+    self.status_msg.tilt_control_auto_enabled = self.tilt_control_auto_enabled
+
+    self.status_msg.pan_control_disabled = self.getPanControlDisabled()
+    self.status_msg.tilt_control_disabled = self.getTiltControlDisabled()
 
 
-    status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled
-    status_msg.tilt_control_manaul_enabled = self.tilt_control_manaul_enabled
+    self.status_msg.image_pub_topic = self.img_pub_topic
 
-    status_msg.pan_control_auto_enabled = self.pan_control_auto_enabled
-    status_msg.tilt_control_auto_enabled = self.tilt_control_auto_enabled
+    self.status_msg.show_full_screen = self.show_full_screen
+    self.status_msg.show_targets_enabled = self.show_targets_enabled
+    self.status_msg.show_track_enabled = self.show_track_enabled
+    self.status_msg.show_crosshair_enabled = self.show_crosshair_enabled
+    self.status_msg.crosshair_offset_degs = self.crosshair_offset_degs
 
-    status_msg.pan_control_disabled = self.getPanControlDisabled()
-    status_msg.tilt_control_disabled = self.getTiltControlDisabled()
+    if last_status_msg != self.status_msg and check == True:
+      self.node_if.publish_pub('status_pub', self.status_msg)
 
-
-    status_msg.image_pub_topic = self.img_pub_topic
-
-    status_msg.show_full_screen = self.show_full_screen
-    status_msg.show_targets_enabled = self.show_targets_enabled
-    status_msg.show_track_enabled = self.show_track_enabled
-    status_msg.show_crosshair_enabled = self.show_crosshair_enabled
-    status_msg.crosshair_offset_degs = self.crosshair_offset_degs
-
-    return status_msg
-
-  def publish_status(self):
-    """Publish the current AutoTurretStatus on the node's status topic.
-
-    Called on the status timer and after every accepted command so the RUI and
-    the child image publisher node both see a change immediately.
-    """
-    if self.node_if is None:
-      return
-    self.status_lock.acquire()
-    try:
-      status_msg = self.get_status_msg()
-      self.node_if.publish_pub('status_pub', status_msg)
-    finally:
-      self.status_lock.release()
 
   #######################
   # Node Cleanup
