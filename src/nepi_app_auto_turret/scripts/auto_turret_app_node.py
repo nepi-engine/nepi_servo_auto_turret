@@ -1177,8 +1177,9 @@ class NepiAutoTurretApp(object):
 
 
     #####################
-    if len(targets_dict_list) > 0:
-      track_dict = targets_dict_list[0]
+    if targets_dict_list is not None:
+      if len(targets_dict_list) > 0:
+        track_dict = targets_dict_list[0]
     # if len(targets_dict_list) == 0 or self.track_process_if is None:
     #   return
     # [best_target, tracking_dict] = nepi_targets_track.get_best_from_targets(
@@ -1206,7 +1207,7 @@ class NepiAutoTurretApp(object):
       track_msg.source_timestamp = nepi_utils.get_time()
       target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
       track_msg.target = target_msg
-      self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
+      #self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
       self.node_if.publish_pub('track_pub', track_msg)
     
     max_hz = self.max_process_rate_hz
