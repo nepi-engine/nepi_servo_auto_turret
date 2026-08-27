@@ -1206,6 +1206,7 @@ class NepiAutoTurretApp(object):
       track_msg.source_timestamp = nepi_utils.get_time()
       target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
       track_msg.target = target_msg
+      #self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
       self.node_if.publish_pub('track_pub', track_msg)
     
     max_hz = self.max_process_rate_hz
@@ -1213,7 +1214,7 @@ class NepiAutoTurretApp(object):
       max_hz = 1
     process_delay = (float(1) / max_hz) - (nepi_utils.get_time() - start_time)
     next_process_delay = max(0.01, process_delay)
-    nepi_sdk.start_timer_process(next_process_delay, self.updaterCb, oneshot = True)
+    nepi_sdk.start_timer_process(next_process_delay, self.processCb, oneshot = True)
 
 
   ###################
