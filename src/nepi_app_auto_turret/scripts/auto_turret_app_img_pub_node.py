@@ -572,11 +572,14 @@ class AutoTurretImgPub:
             draw_track = (self.show_track_enabled == True)
             try:
                 if draw_track == True:
+                    [x_deg,y_deg] = [0,0]
                     track_dict = copy.deepcopy(self.track_dict)
                     if track_dict is not None:
-                        [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
-                    else:
-                        [x_deg,y_deg] = [0,0]
+                        try:
+                            [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
+                        except Exception as e:
+                            self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
+
                     self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
 
                 if self.draw_track != draw_track:
@@ -768,7 +771,7 @@ class AutoTurretImgPub:
         self.last_targets_time = nepi_utils.get_time()
 
     def trackCb(self, msg):
-        self.track_dict = nepi_sdk.convert_msg2dict(msg)
+        self.track_dict = nepi_sdk.convert_msg2dict(msg.target)
         self.last_track_time = nepi_utils.get_time()
 
     def statusCb(self, msg):
