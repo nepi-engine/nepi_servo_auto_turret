@@ -307,13 +307,13 @@ class NepiAutoTurretApp(object):
             'qsize': 1,
             'latch': True
         },
-        'track_pub': {
-            'namespace': self.node_namespace,
-            'topic': 'track',
-            'msg': Track,
-            'qsize': 1,
-            'latch': False
-        }
+        # 'track_pub': {
+        #     'namespace': self.node_namespace,
+        #     'topic': 'track',
+        #     'msg': Track,
+        #     'qsize': 1,
+        #     'latch': False
+        # }
     }
 
     # Subscribers Config Dict ####################
@@ -614,7 +614,7 @@ class NepiAutoTurretApp(object):
                 process_description = self.auto_process_name,
                 process_data_dict = self.auto_process_data,
                 process_controls_dict = self.auto_process_controls,
-                process_status_msg = None,
+                results_msg = None,
                 show_controls = True,
                 show_data = True,
                 log_name = None,
@@ -628,7 +628,7 @@ class NepiAutoTurretApp(object):
                 process_description = self.scan_process_name,
                 process_data_dict = self.scan_process_data,
                 process_controls_dict = self.scan_process_controls,
-                process_status_msg = None,
+                results_msg = None,
                 show_controls = True,
                 show_data = True,
                 log_name = None,
@@ -642,9 +642,10 @@ class NepiAutoTurretApp(object):
                 process_description = self.track_process_name,
                 process_data_dict = self.track_process_data,
                 process_controls_dict = self.track_process_controls,
-                process_status_msg = None,
+                results_msg = Track,
                 show_controls = True,
                 show_data = True,
+                show_results = True,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
@@ -656,7 +657,7 @@ class NepiAutoTurretApp(object):
                 process_description = self.stab_process_name,
                 process_data_dict = self.stab_process_data,
                 process_controls_dict = self.stab_process_controls,
-                process_status_msg = None,
+                results_msg = None,
                 show_controls = True,
                 show_data = True,
                 log_name = None,
@@ -1276,7 +1277,7 @@ class NepiAutoTurretApp(object):
     # Publish Track results
 
     track_msg = Track()
-    if track_dict is not None and self.image_connect_if is not None:
+    if track_dict is not None and self.image_connect_if is not None and self.track_process_if is not None:
         try:
             
             track_msg.timestamp = nepi_utils.get_time()
@@ -1287,7 +1288,7 @@ class NepiAutoTurretApp(object):
             target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
             track_msg.target = target_msg
             #self.msg_if.pub_warn("Publishing track mgs: " + str(track_msg), throttle_s = 5)
-            self.node_if.publish_pub('track_pub', track_msg)
+            self.track_process_if.publish_results(track_msg)
         except Exception as e:
           self.msg_if.pub_warn("Failed to process track_dict: " + str(e), throttle_s = 5)
           pass

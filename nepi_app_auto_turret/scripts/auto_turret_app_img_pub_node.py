@@ -184,7 +184,7 @@ class AutoTurretImgPub:
             },
             'auto_turret_track_sub': {
                 'msg': Track,
-                'namespace': self.process_namespace,
+                'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
                 'callback': self.trackCb,
