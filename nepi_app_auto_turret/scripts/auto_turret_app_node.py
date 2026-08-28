@@ -1482,18 +1482,24 @@ class NepiAutoTurretApp(object):
     #####################
     # Run Process
     #####################
+    pan_manual = auto_process_data['pan_control_manaul_enabled']
+    pan_auto = auto_process_data['pan_auto_manaul_enabled']
+    tilt_manual = auto_process_data['tilt_control_manaul_enabled']
+    tilt_auto = auto_process_data['tilt_auto_manaul_enabled']
 
 
     #####################
     # Run Track Process
-    # if targets_dict_list is not None and len(targets_dict_list) > 0:
-    #   track_dict = targets_dict_list[0]
-    if len(targets_dict_list) == 0 or self.track_process_if is None:
-      return
-    [track_dict, tracking_dict] = nepi_targets_track.get_best_from_targets(
-                                        targets_dict_list,
-                                        tracking_dict = nepi_targets_track.BLANK_SETTINGS_DICT)
-    self.tracking_dict = tracking_dict
+    track_dict = None
+    try:
+      if len(targets_dict_list) == 0 or self.track_process_if is None:
+        return
+      [track_dict, tracking_dict] = nepi_targets_track.get_best_from_targets(
+                                          targets_dict_list,
+                                          tracking_dict = nepi_targets_track.BLANK_SETTINGS_DICT)
+    except:
+      pass
+
 
 
 
@@ -1504,53 +1510,51 @@ class NepiAutoTurretApp(object):
     pantilt_connect_if = self.pantilt_connect_if
 
     if pantilt_connect_if is not None:
-      pantilt_status_dict = pantilt_connect_if.get_status_dict()
-      [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
-     
-      pan_goal_deg = pantilt_status_dict['pan_goal_deg']
-      tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
+      try:
+        pantilt_status_dict = pantilt_connect_if.get_status_dict()
+        [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
+      
+        pan_goal_deg = pantilt_status_dict['pan_goal_deg']
+        tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
 
-      pan_now_ratio = pantilt_status_dict['pan_now_ratio']
-      tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
+        pan_now_ratio = pantilt_status_dict['pan_now_ratio']
+        tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
 
-      pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
-      tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
+        pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
+        tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
 
 
-      has_limit_controls = pantilt_status_dict['has_limit_controls']
-      pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
-      pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
-      tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
-      tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
+        has_limit_controls = pantilt_status_dict['has_limit_controls']
+        pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
+        pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
+        tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
+        tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
 
-      pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
-      pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
-      tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
-      tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
+        pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
+        pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
+        tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
+        tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
 
-      pan_manual = auto_process_data['pan_control_manaul_enabled']
-      pan_auto = auto_process_data['pan_auto_manaul_enabled']
-      tilt_manual = auto_process_data['tilt_control_manaul_enabled']
-      tilt_auto = auto_process_data['tilt_auto_manaul_enabled']
 
-      if pan_manual == True:
-        auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
-      else:
-        auto_pan_error_deg = 0
+        if pan_manual == True:
+          auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
+        else:
+          auto_pan_error_deg = 0
 
-      # auto_process_data['auto_pan_goal_ratio'] = pantilt_connect_if
-      # auto_process_data['auto_pan_goal_deg'] =
-      auto_process_data['auto_pan_error_deg'] = auto_pan_error_deg
+        # auto_process_data['auto_pan_goal_ratio'] = pantilt_connect_if
+        # auto_process_data['auto_pan_goal_deg'] =
+        auto_process_data['auto_pan_error_deg'] = auto_pan_error_deg
 
-      if tilt_manual == True:
-        auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
-      else:
-        auto_tilt_error_deg = 0
+        if tilt_manual == True:
+          auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
+        else:
+          auto_tilt_error_deg = 0
 
-      # auto_process_data['auto_tilt_goal_ratio'] =
-      # auto_process_data['auto_tilt_goal_deg'] =
-      auto_process_data['auto_tilt_error_deg'] = auto_tilt_error_deg
-
+        # auto_process_data['auto_tilt_goal_ratio'] =
+        # auto_process_data['auto_tilt_goal_deg'] =
+        auto_process_data['auto_tilt_error_deg'] = auto_tilt_error_deg
+      except:
+        pass
 
     #####################
     # Apply Process Outputs
@@ -1569,18 +1573,22 @@ class NepiAutoTurretApp(object):
 
     #####################
     # Publish Track results
+
     if track_dict is not None and self.image_connect_if is not None:
-      track_msg = Track()
-      track_msg.timestamp = nepi_utils.get_time()
-      track_msg.process_name = self.node_name
-      track_msg.process_namespace = self.node_namespace
-      track_msg.source_topic = self.image_connect_if.get_namespace()
-      track_msg.source_timestamp = nepi_utils.get_time()
-      target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
-      track_msg.target = target_msg
-      #self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
-      self.node_if.publish_pub('track_pub', track_msg)
-    
+        try:
+            track_msg = Track()
+            track_msg.timestamp = nepi_utils.get_time()
+            track_msg.process_name = self.node_name
+            track_msg.process_namespace = self.node_namespace
+            track_msg.source_topic = self.image_connect_if.get_namespace()
+            track_msg.source_timestamp = nepi_utils.get_time()
+            target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
+            track_msg.target = target_msg
+            #self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
+            self.node_if.publish_pub('track_pub', track_msg)
+        except:
+          pass
+        
     max_hz = self.max_process_rate_hz
     if max_hz < 1:
       max_hz = 1

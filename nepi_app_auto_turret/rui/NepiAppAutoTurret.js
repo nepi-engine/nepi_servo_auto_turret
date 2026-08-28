@@ -369,7 +369,7 @@ class NepiAppAutoTurret extends Component {
 
         <NepiIFConnectTargets
           namespace={app_namespace + "/targets_connect"}
-          select_title={"Targeter"}
+          select_title={"Targets"}
           show_selector={true}
           show_controls={false}
           show_data={false}
@@ -866,7 +866,7 @@ class NepiAppAutoTurret extends Component {
         const full_screen_enabled = status_msg.show_full_screen
         const show_targets_enabled = status_msg.show_targets_enabled
         const show_track_enabled = status_msg.show_track_enabled
-        const show_crosshair_enabled = status_msg.show_crosshair_enabled
+        const show_goal_enabled = status_msg.show_goal_enabled
 
 
         const pantilt_namespace = status_msg.selected_pantilt_topic
@@ -966,8 +966,8 @@ class NepiAppAutoTurret extends Component {
 
                   <Label title="Show Goal">
                     <AsyncToggle
-                      checked={show_crosshair_enabled === true}
-                      onClick={() => sendBoolMsg(process_namespace + "/set_show_crosshair", show_crosshair_enabled === false)}>
+                      checked={show_goal_enabled === true}
+                      onClick={() => sendBoolMsg(process_namespace + "/set_show_crosshair", show_goal_enabled === false)}>
                     </AsyncToggle>
                   </Label>
 
