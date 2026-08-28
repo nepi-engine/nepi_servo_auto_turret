@@ -1,0 +1,240 @@
+#!/bin/bash
+##
+## Copyright (c) 2024 Numurus, LLC <https://www.numurus.com>.
+##
+## This file is part of nepi-engine
+## (see https://github.com/nepi-engine).
+##
+## License: 3-clause BSD, see https://opensource.org/licenses/BSD-3-Clause
+##
+
+#    NEPI_TARGET_IP: Target IP address/hostname
+     NEPI_TARGET_IP=192.168.179.103
+     if [[ -n $NEPI_TARGET_IP ]]; then
+        NEPI_TARGET_IP=${NEPI_IP}
+     fi
+
+    nepi_user_build=nepihost
+    nepi_user_live=nepi
+
+#    NEPI_SSH_KEY: Private SSH key for SSH/Rsync to target (as applicable)
+     NEPI_SSH_KEY=/home/${USER}/.ssh/nepi_default_ssh_key
+
+#######################################################################################################
+# # Clear known hosts keys
+# sudo rm /home/${USER}/.ssh/known*
+########################################
+
+
+
+
+# Set NEPI folder variables if not configured by nepi aliases bash script
+if [[ ! -v NEPI_USER ]]; then
+    NEPI_USER=nepi
+fi
+if [[ ! -v NEPI_HOME ]]; then
+    NEPI_HOME=/home/${NEPI_USER}
+fi
+if [[ ! -v NEPI_DOCKER ]]; then
+    NEPI_DOCKER=/mnt/nepi_docker
+fi
+if [[ ! -v NEPI_STORAGE ]]; then
+   NEPI_STORAGE=/mnt/nepi_storage
+fi
+if [[ ! -v NEPI_CONFIG ]]; then
+    NEPI_CONFIG=/mnt/nepi_config
+fi
+if [[ ! -v NEPI_BASE ]]; then
+    NEPI_BASE=/opt/nepi
+fi
+if [[ ! -v NEPI_RUI ]]; then
+    NEPI_RUI=${NEPI_BASE}/nepi_rui
+fi
+if [[ ! -v NEPI_ENGINE ]]; then
+    NEPI_ENGINE=${NEPI_BASE}/nepi_engine
+fi
+if [[ ! -v NEPI_ETC ]]; then
+    NEPI_ETC=${NEPI_BASE}/etc
+fi
+
+
+if [[ -z "${NEPI_REMOTE_SETUP}" ]]; then
+  echo "Must have environtment variable NEPI_REMOTE_SETUP set"
+  exit 1
+fi
+
+if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+    echo "Running in Local Mode"
+
+elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+
+  if [[ -z "${NEPI_TARGET_IP}" ]]; then
+    echo "Remote setup requires env. variable NEPI_TARGET_IP be assigned"
+    exit 1
+  fi
+ 
+  if [[ -z "${NEPI_SSH_KEY}" ]]; then
+    echo "Remote setup requires env. variable NEPI_SSH_KEY be assigned"
+    exit 1
+  fi
+fi
+
+
+echo $(pwd)
+
+###############################################
+
+SRC_FOLDER=$(cd -P "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+SRC_NAME=$(basename "$SRC_FOLDER")
+
+###############################################
+# Deploy SRC
+###############################################
+
+
+RSYNC_EXCLUDES=" --exclude .git --exclude .gitmodules"
+#echo "Excluding ${RSYNC_EXCLUDES}"
+
+####################################
+# Deploy System Config SRC Files
+echo ""
+echo "--------------------------------------------"
+echo "DEPLOYING SYSTEM CONFIG SRC BUILD UPDATES"
+echo ""
+
+echo $(pwd)
+echo "Deploying to NEPI target IP: ${NEPI_TARGET_IP} (port ${NEPI_SSH_PORT})"
+
+RSYNC_EXCLUDES=" --exclude .git --exclude .gitmodules --exclude empty.txt"
+echo "Excluding ${RSYNC_EXCLUDES}"
+
+SOURCE_PATH=$SRC_FOLDER
+SOURCE_DEST_PATH=${NEPI_CONFIG}/system_cfg/src
+echo "Syncing NEPI system config from ${SOURCE_PATH} to ${SOURCE_DEST_PATH}"
+if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+  rsync -avrh  --delete ${RSYNC_EXCLUDES} ${SOURCE_PATH}/ ${SOURCE_DEST_PATH}/
+
+elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+  echo 'rsync -avzhe "ssh -i '${NEPI_SSH_KEY}' -p '${NEPI_SSH_PORT}' -o StrictHostKeyChecking=no" --delete '${RSYNC_EXCLUDES}' '${SOURCE_PATH}'/ '${NEPI_DEPLOY_USERNAME}'@'${NEPI_TARGET_IP}':'${SOURCE_DEST_PATH}'/'
+  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -p ${NEPI_SSH_PORT} -o StrictHostKeyChecking=no" --delete ${RSYNC_EXCLUDES} ${SOURCE_PATH}/ ${NEPI_DEPLOY_USERNAME}@${NEPI_TARGET_IP}:${SOURCE_DEST_PATH}/
+
+fi
+
+
+
+
+###############################################
+# Deploy SRC Live
+###############################################
+
+
+RSYNC_EXCLUDES=" --exclude .git --exclude .gitmodules"
+#echo "Excluding ${RSYNC_EXCLUDES}"
+
+echo ""
+echo "--------------------------------------------"
+echo "DEPLOYING LIVE UPDATES"
+echo ""
+
+SUCCESS=1
+
+
+############################
+# Deploy Live SDK
+SOURCE_PATH=${SRC_FOLDER}/nepi_sdk
+DEST_PATH=/opt/nepi/nepi_engine/lib/python3/dist-packages/nepi_sdk
+if [[ $SUCCESS -eq 1 && -d $SOURCE_PATH ]]; then
+  echo ""
+  echo "Sending Live Updates from Source Path ${SOURCE_PATH}"
+  echo "to Destination Path ${DEST_PATH}"
+  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -o StrictHostKeyChecking=no -p 2222" ${RSYNC_EXCLUDES} ${SOURCE_PATH}/* ${nepi_user_live}@${NEPI_TARGET_IP}:${DEST_PATH}/ 2> /dev/null
+  if [[ $? -ne 0 ]]; then
+    if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+      local_host_ip="localhost"
+    elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+      local_host_ip=$NEPI_TARGET_IP
+    fi
+    echo "Failed connect to a running NEPI container on host: ${local_host_ip}"
+    echo "Live Updates Failed"
+    SUCCESS=0
+  fi
+fi
+
+############################
+# Deploy Live API
+SOURCE_PATH=${SRC_FOLDER}/nepi_api
+DEST_PATH=/opt/nepi/nepi_engine/lib/python3/dist-packages/nepi_api
+if [[ $SUCCESS -eq 1 && -d $SOURCE_PATH ]]; then
+  echo ""
+  echo "Sending Live Updates from Source Path ${SOURCE_PATH}"
+  echo "to Destination Path ${DEST_PATH}"
+  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -o StrictHostKeyChecking=no -p 2222" ${RSYNC_EXCLUDES} ${SOURCE_PATH}/* ${nepi_user_live}@${NEPI_TARGET_IP}:${DEST_PATH}/ 2> /dev/null
+  if [[ $? -ne 0 ]]; then
+    if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+      local_host_ip="localhost"
+    elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+      local_host_ip=$NEPI_TARGET_IP
+    fi
+    echo "Failed connect to a running NEPI container on host: ${local_host_ip}"
+    echo "Live Updates Failed"
+    SUCCESS=0
+  fi
+fi
+
+
+
+############################
+# Deploy Live RUI
+SOURCE_PATH=${SRC_FOLDER}/nepi_rui
+DEST_PATH="${NEPI_BASE}/nepi_rui/src/rui_webserver/rui-app/src"
+if [[ $SUCCESS -eq 1 && -d $SOURCE_PATH ]]; then
+  echo ""
+  echo "Sending Live Updates from Source Path ${SOURCE_PATH}"
+  echo "to Destination Path ${DEST_PATH}"
+  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -o StrictHostKeyChecking=no -p 2222" ${RSYNC_EXCLUDES} ${SOURCE_PATH}/* ${nepi_user_live}@${NEPI_TARGET_IP}:${DEST_PATH}/ 2> /dev/null
+  if [[ $? -ne 0 ]]; then
+    if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+      local_host_ip="localhost"
+    elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+      local_host_ip=$NEPI_TARGET_IP
+    fi
+    echo "Failed connect to a running NEPI container on host: ${local_host_ip}"
+    echo "Live Updates Failed"
+    SUCCESS=0
+  fi
+fi
+
+
+# ###############################################
+# # Live Deploy Drivers
+# ###############################################
+
+
+
+############################
+# Deploy Live Drivers
+DEPLOY_NAME=nepi_drivers
+DRIVERS_SOURCE_PATH=$REPO_FOLDER/${DEPLOY_NAME}
+DEST_PATH=${DEPLOY_FOLDER}/lib/nepi_drivers
+if [[ $SUCCESS -eq 1 ]]; then
+  for dir in "$DRIVERS_SOURCE_PATH"/*/; do
+      # Ensure the directory actually exists (handles empty folders safely)
+      if [[ -d "$dir" && "$dir" != "${DRIVERS_SOURCE_PATH}/src/"  && "$dir" != "${DRIVERS_SOURCE_PATH}/scripts/" ]]; then
+        SOURCE_PATH=$dir 
+          echo ""
+          echo "Sending Live Updates from Source Path ${SOURCE_PATH}"
+          echo "to Destination Path ${DEST_PATH}"
+          rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -o StrictHostKeyChecking=no -p 2222" ${RSYNC_EXCLUDES} ${SOURCE_PATH}/* ${nepi_user_live}@${NEPI_TARGET_IP}:${DEST_PATH}/ 2> /dev/null
+          if [[ $? -ne 0 ]]; then
+            if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
+              local_host_ip="localhost"
+            elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
+              local_host_ip=$NEPI_TARGET_IP
+            fi
+            echo "Failed connect to a running NEPI container on host: ${local_host_ip}"
+            echo "Live Updates Failed"
+            SUCCESS=0
+          fi
+      fi
+  done
+fi

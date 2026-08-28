@@ -99,52 +99,9 @@ elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
   fi
 fi
 
+####################################
+# Deploy System Build and Live Files
 
-echo $(pwd)
-echo "Deploying to NEPI target IP: ${NEPI_TARGET_IP} (port ${NEPI_SSH_PORT})"
-# ## Synce update remote clock if needed
-# echo "Syncing remote clock if needed"
-# if [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
-#   sshnhc
-# fi
-
-
-RSYNC_EXCLUDES=" --exclude .git --exclude .gitmodules --exclude empty.txt"
-
-echo "Excluding ${RSYNC_EXCLUDES}"
-
-
-# Deploy System Config Files
-
-
-SOURCE_PATH=$(pwd)/src
-SOURCE_DEST_PATH=${NEPI_CONFIG}/system_cfg/src
-echo "Syncing NEPI system config from ${SOURCE_PATH} to ${SOURCE_DEST_PATH}"
-if [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
-  rsync -avrh  --delete ${RSYNC_EXCLUDES} ${SOURCE_PATH}/ ${SOURCE_DEST_PATH}/
-
-elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
-  echo 'rsync -avzhe "ssh -i '${NEPI_SSH_KEY}' -p '${NEPI_SSH_PORT}' -o StrictHostKeyChecking=no" --delete '${RSYNC_EXCLUDES}' '${SOURCE_PATH}'/ '${NEPI_DEPLOY_USERNAME}'@'${NEPI_TARGET_IP}':'${SOURCE_DEST_PATH}'/'
-  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -p ${NEPI_SSH_PORT} -o StrictHostKeyChecking=no" --delete ${RSYNC_EXCLUDES} ${SOURCE_PATH}/ ${NEPI_DEPLOY_USERNAME}@${NEPI_TARGET_IP}:${SOURCE_DEST_PATH}/
-
-fi
-
-
-SCRIPTS_SOURCE_PATH=$(pwd)/src/nepi_scripts
-SCRIPTS_DEST_PATH=/mnt/nepi_storage/nepi_scripts
-
-# This repo does not necessarily ship a src/nepi_scripts directory -- it is part of the
-# nepi_engine layout this deploy script was templated from. Skip the sync rather than
-# letting rsync fail with "change_dir ... No such file or directory" (exit 23).
-if [ ! -d "${SCRIPTS_SOURCE_PATH}" ]; then
-  echo "No ${SCRIPTS_SOURCE_PATH} in this repo -- skipping NEPI scripts sync"
-
-elif [ "${NEPI_REMOTE_SETUP}" == "0" ]; then
-  echo "Syncing NEPI scripts from ${SCRIPTS_SOURCE_PATH} to ${SCRIPTS_DEST_PATH}"
-  rsync -avrh  --delete ${RSYNC_EXCLUDES} ${SCRIPTS_SOURCE_PATH}/ ${SCRIPTS_DEST_PATH}/
-
-elif [ "${NEPI_REMOTE_SETUP}" == "1" ]; then
-  echo "Syncing NEPI scripts from ${SCRIPTS_SOURCE_PATH} to ${SCRIPTS_DEST_PATH}"
-  rsync -avzhe "ssh -i ${NEPI_SSH_KEY} -p ${NEPI_SSH_PORT} -o StrictHostKeyChecking=no" --delete ${RSYNC_EXCLUDES} ${SCRIPTS_SOURCE_PATH}/ ${NEPI_DEPLOY_USERNAME}@${NEPI_TARGET_IP}:${SCRIPTS_DEST_PATH}/
-
-fi
+source ./nepi_app_auto_turret/deploy_app.sh
+source ./ptx_drivers/deploy_drivers.sh
+source ./src/deploy_src.sh
