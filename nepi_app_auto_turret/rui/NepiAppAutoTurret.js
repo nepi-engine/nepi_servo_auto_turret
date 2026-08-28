@@ -20,6 +20,7 @@
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 
+import Toggle from "react-toggle"
 import Section from "./Section"
 import Label from "./Label"
 import { Column, Columns } from "./Columns"
@@ -58,15 +59,10 @@ function round(value, decimals = 0) {
 //
 // This page binds to ONE app node, not to a manager list. The status topic is
 // <app>/status carrying nepi_app_auto_turret/AutoTurretStatus, and every command
-// topic hangs off the app namespace.
-//
-// The node owns four processes -- auto, scan, track and stab -- and reports a
-// namespace for each in status_msg.<name>_process_namespace. The Controls block
-// at the bottom renders one shared Nepi_IF_ConnectProcess per process against
-// those namespaces, with show_enable off: the four Enable toggles in the panel
-// above are this page's own, and both they and the process panels drive the
-// same state in the node, so showing two toggles per process would only invite
-// them to look out of sync.
+// topic hangs off the app namespace. The algorithm's own controls are rendered by
+// the shared Nepi_IF_ConnectProcess against status_msg.controls_topic -- a field
+// AutoTurretStatus does not yet define, so that block falls back to <app>/controls
+// and stays empty until either the field or a ControlsIF is added.
 class NepiAppAutoTurret extends Component {
 
   constructor(props) {
@@ -90,6 +86,8 @@ class NepiAppAutoTurret extends Component {
       lastPanGoto: null,
       tiltGoto: null,
       lastTiltGoto: null,
+
+      show_control: 'None',
 
       statusListener: null,
       needs_update: false
@@ -173,13 +171,13 @@ class NepiAppAutoTurret extends Component {
     const pantilt_status_msg = message.pantilt_status_msg
 
     const pan_disabled = (message.pan_control_manaul_enabled === true)
-    const pan_goal_deg = round((message.pan_control_manaul_enabled === true) ? pantilt_status_msg.pan_goal_deg : message.auto_pan_deg, 1)
+    const pan_goal_deg = round((message.pan_control_manaul_enabled === true) ? pantilt_status_msg.pan_goal_deg : message.auto_pan_goal_deg, 1)
     if (this.state.panGoto == null || pan_goal_deg !== this.state.lastPanGoto) {
       this.setState({ panGoto: pan_goal_deg, lastPanGoto: pan_goal_deg})
     }
 
     const tilt_disabled = (message.tilt_control_disabled === true)
-    const tilt_goal_deg = round((message.tilt_control_manaul_enabled === true) ? pantilt_status_msg.tilt_goal_deg : message.auto_tilt_deg, 1)
+    const tilt_goal_deg = round((message.tilt_control_manaul_enabled === true) ? pantilt_status_msg.tilt_goal_deg : message.auto_tilt_goal_deg, 1)
     if (this.state.tiltGoto == null || tilt_goal_deg !== this.state.lastTiltGoto) {
       this.setState({ tiltGoto: tilt_goal_deg, lastTiltGoto: tilt_goal_deg})
     }
@@ -274,9 +272,6 @@ class NepiAppAutoTurret extends Component {
     const auto_select_active = status_msg.auto_select_enabled
     const pantilt_connected = status_msg.pantilt_connected
     
-
-    const auto_ready = status_msg.auto_ready
-    const auto_enabled = status_msg.auto_enabled
 
     const scanning_ready = status_msg.scanning_ready
     const scanning_enabled = status_msg.scanning_enabled
@@ -397,118 +392,36 @@ class NepiAppAutoTurret extends Component {
         />
 
 
-        {/* MODE-COUPLING-DISABLED
-            Coupling 1 of 3, RUI half: the block-level ready gate. This div used
-            to carry hidden={pantilt_connected === false}, which removed all four
-            enable toggles whenever no pan tilt was connected -- the same
-            precondition auto_ready is computed from, applied to the whole block
-            rather than to one toggle. Restoring that attribute hides the four
-            enables again until a pan tilt connects. The pan tilt readout below
-            stays gated on its own inside renderPTAuto(), which returns an empty
-            fragment with no connected device, so nothing here renders a
-            dashboard for a device that is not there. */}
-        <div>
+        <div hidden={pantilt_connected === false}>
 
           <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
           <Columns>
           <Column>
 
-            {/* Enable Auto is the supervisor switch, so it comes first and the
-                three mode enables sit under it. The four are independent
-                switches: each can be set on or off at any time, whatever the
-                other three are set to and whatever its own ready state is. The
-                node refuses no enable and no enable changes another -- see the
-                MODE-COUPLING-DISABLED blocks in auto_turret_app_node.py.
-
-                Ready is advisory and shown, not enforced. Each row carries a
-                Ready indicator beside its toggle so an operator can see that a
-                mode is armed against a source that is not connected, which is a
-                condition to display rather than a reason the click will not
-                take. */}
-            <Label title="Enable Auto">
-              {/* MODE-COUPLING-DISABLED
-                  Coupling 1 of 3, RUI half: the ready-based grey-out. The
-                  attribute below is the original, verbatim; restoring it as an
-                  attribute of the AsyncToggle makes the toggle unclickable
-                  whenever the node reports auto_ready false. Held in a JSX
-                  comment rather than a comment inside the opening tag so the
-                  tag itself carries nothing the build has to skip.
-
-                    disabled={auto_ready === false}
-              */}
-              <AsyncToggle
-                checked={auto_enabled === true}
-                onClick={() => sendBoolMsg(process_namespace + "/set_auto_enable", !auto_enabled)}>
-              </AsyncToggle>
-            </Label>
-
-            <Label title="Auto Ready">
-              <BooleanIndicator value={auto_ready === true} />
-            </Label>
-
             <Label title="Enable Scanning">
-              {/* MODE-COUPLING-DISABLED
-                  Coupling 1 of 3, RUI half: the ready-based grey-out. The
-                  attribute below is the original, verbatim; restoring it as an
-                  attribute of the AsyncToggle makes the toggle unclickable
-                  whenever the node reports scanning_ready false. Held in a JSX
-                  comment rather than a comment inside the opening tag so the
-                  tag itself carries nothing the build has to skip.
-
-                    disabled={scanning_ready === false}
-              */}
               <AsyncToggle
+                disabled={scanning_ready == false}
                 checked={scanning_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_scanning_enable", !scanning_enabled)}>
               </AsyncToggle>
             </Label>
 
-            <Label title="Scanning Ready">
-              <BooleanIndicator value={scanning_ready === true} />
-            </Label>
-
             <Label title="Enable Tracking">
-              {/* MODE-COUPLING-DISABLED
-                  Coupling 1 of 3, RUI half: the ready-based grey-out. The
-                  attribute below is the original, verbatim; restoring it as an
-                  attribute of the AsyncToggle makes the toggle unclickable
-                  whenever the node reports tracking_ready false. Held in a JSX
-                  comment rather than a comment inside the opening tag so the
-                  tag itself carries nothing the build has to skip.
-
-                    disabled={tracking_ready === false}
-              */}
               <AsyncToggle
+                disabled={tracking_ready == false}
                 checked={tracking_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_tracking_enable", !tracking_enabled)}>
               </AsyncToggle>
             </Label>
 
-            <Label title="Tracking Ready">
-              <BooleanIndicator value={tracking_ready === true} />
-            </Label>
-
 
             <Label title="Enable Stabilize">
-              {/* MODE-COUPLING-DISABLED
-                  Coupling 1 of 3, RUI half: the ready-based grey-out. The
-                  attribute below is the original, verbatim; restoring it as an
-                  attribute of the AsyncToggle makes the toggle unclickable
-                  whenever the node reports stabilize_ready false. Held in a JSX
-                  comment rather than a comment inside the opening tag so the
-                  tag itself carries nothing the build has to skip.
-
-                    disabled={stabilize_ready === false}
-              */}
               <AsyncToggle
+                disabled={stabilize_ready == false}
                 checked={stabilize_enabled === true}
                 onClick={() => sendBoolMsg(process_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
               </AsyncToggle>
-            </Label>
-
-            <Label title="Stabilize Ready">
-              <BooleanIndicator value={stabilize_ready === true} />
             </Label>
 
           </Column>
@@ -1177,98 +1090,141 @@ class NepiAppAutoTurret extends Component {
         const max_process_rate_hz = status_msg.max_process_rate_hz
         const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
 
-        // One block per process, mounted on the namespace the node reports for
-        // that process and shown when and only when that process is enabled.
-        // The enable is the mount condition on purpose: enabling a process is
-        // what brings its controls and its data onto the page, and disabling it
-        // is what takes them away. There is no local view-state selector any
-        // more -- the four processes are independent, so at most one open at a
-        // time was the wrong shape.
-        const process_blocks = [
-          { key: 'auto',  title: 'Auto',      enabled: status_msg.auto_enabled === true,
-            namespace: status_msg.auto_process_namespace },
-          { key: 'scan',  title: 'Scan',      enabled: status_msg.scanning_enabled === true,
-            namespace: status_msg.scan_process_namespace },
-          { key: 'track', title: 'Track',     enabled: status_msg.tracking_enabled === true,
-            namespace: status_msg.track_process_namespace },
-          { key: 'stab',  title: 'Stabilize', enabled: status_msg.stabilize_enabled === true,
-            namespace: status_msg.stab_process_namespace }
-        ]
-
+        const show_control = this.state.show_control
         return (
           <React.Fragment>
-
-
+   
+       
           <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
 
 
           <Label title={"Controls"}></Label>
 
-          {/* App-level rates. These belong to the app node, not to any one
-              process, so they are not gated on a process enable the way the
-              four blocks below are. */}
-          <SliderAdjustment
-            title={"Max Process Rate"}
-            msgType={"std_msgs/Float32"}
-            adjustment={max_process_rate_hz}
-            topic={process_namespace + "/set_max_process_rate"}
-            scaled={1.0}
-            min={1}
-            max={20}
-            disabled={false}
-            tooltip={"Sets process max rate in hz"}
-            unit={"Hz"}
-          />
+                  <div style={{ display: 'flex' }} >
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Track"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Stab"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Auto"}</div>
+                  </div>
 
-          <SliderAdjustment
-            title={"Max Image Publish Rate"}
-            msgType={"std_msgs/Float32"}
-            adjustment={max_image_pub_rate_hz}
-            topic={process_namespace + "/set_max_image_pub_rate"}
-            scaled={1.0}
-            min={1}
-            max={20}
-            disabled={false}
-            tooltip={"Sets overlay image max publish rate in hz"}
-            unit={"Hz"}
-          />
+                  <div style={{ display: 'flex' }} >
 
-          {/* Nepi_IF_ConnectProcess owns both blocks: it subscribes to
-              <namespace>/status for the ProcessStatus the node's ProcessIF
-              publishes, and renders Nepi_IF_Data off status_msg.process_data
-              and Nepi_IF_Controls off status_msg.process_controls. So the
-              generic controls dict and the generic data dict reach the page
-              through the generic components, with no per-mode rendering here.
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
 
-              allways_show_data / allways_show_controls force both open and drop
-              the component's own Show Data / Show Controls sub-toggles -- the
-              enable above is already the operator's show/hide for this process.
+                        <Toggle
+                        checked={(show_control === 'scan')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'scan') ? 'None' : 'scan' )}>
+                        </Toggle>
+                  </div>
 
-              show_enable stays false: the four Enable toggles in the panel above
-              and this component's own Enable drive the same node state, and two
-              toggles per process would only invite them to look out of sync.
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
 
-              key is the process namespace, so a namespace change remounts the
-              block rather than re-pointing a live subscription at it. */}
-          {process_blocks.map((process) => {
-            if (process.enabled !== true) { return null }
-            if (process.namespace == null || process.namespace === '' || process.namespace === 'None') { return null }
-            return (
-              <React.Fragment key={process.namespace}>
-                <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
-                <Label title={process.title}></Label>
-                <Nepi_IF_ConnectProcess
-                  key={process.namespace}
-                  make_section={false}
-                  title={null}
-                  show_enable={false}
-                  allways_show_data={true}
-                  allways_show_controls={true}
-                  namespace={process.namespace}
-                  />
-              </React.Fragment>
-            )
-          })}
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'track')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'track') ? 'None' : 'track' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'stab')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'stab') ? 'None' : 'stab' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                    <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+                        <Toggle
+                          checked={(show_control === 'auto')}
+                          onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'auto') ? 'None' : 'auto' )}>
+                        </Toggle>
+
+
+                    </div>
+
+
+              </div>
+
+
+      { ( show_control === 'scan' ) ?
+      <Nepi_IF_ConnectProcess
+        make_section={false}
+        title={null}
+        namespace={ status_msg.scan_process_namespace}
+        />
+        : null}
+
+
+      { ( show_control === 'track' ) ?
+      <Nepi_IF_ConnectProcess
+        make_section={false}
+        title={null}
+        namespace={ status_msg.track_process_namespace}
+        />
+        : null}
+
+      { ( show_control === 'stab' ) ?
+      <Nepi_IF_ConnectProcess
+        make_section={false}
+        title={null}
+        namespace={ status_msg.stab_process_namespace}
+        />
+        : null}
+
+
+
+      { ( show_control === 'auto' ) ?
+
+        <SliderAdjustment
+          title={"Max Process Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_process_rate_hz}
+          topic={process_namespace + "/set_max_process_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets process max rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+
+      { ( show_control === 'auto' ) ?
+        <SliderAdjustment
+          title={"Max Image Publish Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_image_pub_rate_hz}
+          topic={process_namespace + "/set_max_image_pub_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets overlay image max publish rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+
+      { ( show_control === 'auto' ) ?
+      <Nepi_IF_ConnectProcess
+        make_section={false}
+        title={null}
+        namespace={ status_msg.auto_process_namespace}
+        />
+        : null}
+
+
 
             </React.Fragment>
         )

@@ -112,7 +112,7 @@ PROCESS_CLEARS = {
     STAB_PROCESS: [TRACK_PROCESS, SCAN_PROCESS]
 }
 
-# Until the pt_auto_2 loop is wired to a live auto_data_dict, an enabled process
+# Until the pt_auto_2 loop is wired to a live auto_process_data, an enabled process
 # is enabled and not running, and says so. Reporting running = enabled here
 # would put a green Running indicator on a loop that does not exist.
 PROCESS_NOT_RUNNING_MSG = 'Enabled. Control loop not yet wired; no axis is driven.'
@@ -207,10 +207,9 @@ class NepiAutoTurretApp(object):
 
   # Overlay controls, consumed by the image publisher node off the status msg
   show_full_screen = False
-  show_targets_enabled = False
-  show_track_enabled = False
-  show_crosshair_enabled = False
-  crosshair_offset_degs = [0.0, 0.0]
+  show_targets_enabled = True
+  show_track_enabled = True
+  show_goal_enabled = True
 
   # Child overlay image publisher node
   img_pub_sub_process = None
@@ -345,13 +344,9 @@ class NepiAutoTurretApp(object):
             'namespace': self.node_namespace,
             'factory_val': self.show_track_enabled
         },
-        'show_crosshair_enabled': {
+        'show_goal_enabled': {
             'namespace': self.node_namespace,
-            'factory_val': self.show_crosshair_enabled
-        },
-        'crosshair_offset_degs': {
-            'namespace': self.node_namespace,
-            'factory_val': self.crosshair_offset_degs
+            'factory_val': self.show_goal_enabled
         }
     }
 
@@ -572,14 +567,6 @@ class NepiAutoTurretApp(object):
             'msg': Bool,
             'qsize': 1,
             'callback': self.setShowCrosshairCb,
-            'callback_args': ()
-        },
-        'set_crosshair_offset': {
-            'namespace': self.node_namespace,
-            'topic': 'set_crosshair_offset',
-            'msg': FloatArray,
-            'qsize': 1,
-            'callback': self.setCrosshairOffsetCb,
             'callback_args': ()
         }
     }
@@ -1074,7 +1061,7 @@ class NepiAutoTurretApp(object):
   # What an enable actually does today: it sets the mode flags that
   # nepi_auto_pt.pt_auto_2 reads, and it hands the axes to auto control. The
   # controller loop itself is not wired yet -- nothing in this node builds the
-  # auto_data_dict it needs (navpose feed, mount transforms, per-axis servo
+  # auto_process_data it needs (navpose feed, mount transforms, per-axis servo
   # state) -- so an enabled process reports enabled and NOT running, with
   # PROCESS_NOT_RUNNING_MSG saying why. Wiring the loop is what flips running.
 
@@ -1340,19 +1327,8 @@ class NepiAutoTurretApp(object):
   def setShowCrosshairCb(self, msg):
     enabled = msg.data
     self.msg_if.pub_info("Setting show crosshair to: " + str(enabled))
-    self.show_crosshair_enabled = enabled
-    self.setParam('show_crosshair_enabled', enabled)
-    self.publish_status()
-
-  def setCrosshairOffsetCb(self, msg):
-    # The image publisher node unpacks exactly two entries.
-    offsets = list(msg.array)
-    if len(offsets) != 2:
-      self.msg_if.pub_warn("Crosshair offset needs two entries, got: " + str(offsets))
-      return
-    self.msg_if.pub_info("Setting crosshair offset to: " + str(offsets))
-    self.crosshair_offset_degs = offsets
-    self.setParam('crosshair_offset_degs', offsets)
+    self.show_goal_enabled = enabled
+    self.setParam('show_goal_enabled', enabled)
     self.publish_status()
 
   ###############################
@@ -1429,8 +1405,8 @@ class NepiAutoTurretApp(object):
       self.show_full_screen = self.node_if.get_param('show_full_screen')
       self.show_targets_enabled = self.node_if.get_param('show_targets_enabled')
       self.show_track_enabled = self.node_if.get_param('show_track_enabled')
-      self.show_crosshair_enabled = self.node_if.get_param('show_crosshair_enabled')
-      self.crosshair_offset_degs = list(self.node_if.get_param('crosshair_offset_degs'))
+      self.show_goal_enabled = self.node_if.get_param('show_goal_enabled')
+
 
       # The ProcessIFs come up before the params are restored, so each one is
       # told the restored enable state here. This node owns that state; the
@@ -1474,15 +1450,42 @@ class NepiAutoTurretApp(object):
     
     start_time = nepi_utils.get_time()
     #####################
+    # Setup Process Inputs
+    #####################
     self.targets_lock.acquire()
     targets_dict_list = copy.deepcopy(self.targets_dict_list)
     self.targets_lock.release()
     track_dict = None 
 
 
+    #####################
+    # Update Auto Process Data
+    auto_process_data = dict()
+    auto_process_data['pan_control_manaul_enabled'] = True
+    auto_process_data['pan_auto_manaul_enabled'] = False
+    auto_process_data['tilt_control_manaul_enabled'] = True
+    auto_process_data['tilt_auto_manaul_enabled'] = False
+
+    auto_process_data['auto_pan_goal_ratio'] = 0
+    auto_process_data['auto_pan_goal_deg'] = 0
+    auto_process_data['auto_pan_error_deg'] = 0
+
+    auto_process_data['auto_tilt_goal_ratio'] = 0
+    auto_process_data['auto_tilt_goal_deg'] = 0
+    auto_process_data['auto_tilt_error_deg'] = 0
+
+
+
+
 
 
     #####################
+    # Run Process
+    #####################
+
+
+    #####################
+    # Run Track Process
     if targets_dict_list is not None and len(targets_dict_list) > 0:
       track_dict = targets_dict_list[0]
     # if len(targets_dict_list) == 0 or self.track_process_if is None:
@@ -1502,7 +1505,78 @@ class NepiAutoTurretApp(object):
     #   return
 
 
+
+    
     #####################
+    # Update Auto Process Data
+    pantilt_connect_if = self.pantilt_connect_if
+
+    if pantilt_connect_if is not None:
+      pantilt_status_dict = pantilt_connect_if.get_status_dict()
+      [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
+     
+      pan_goal_deg = pantilt_status_dict['pan_goal_deg']
+      tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
+
+      pan_now_ratio = pantilt_status_dict['pan_now_ratio']
+      tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
+
+      pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
+      tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
+
+
+      has_limit_controls = pantilt_status_dict['has_limit_controls']
+      pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
+      pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
+      tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
+      tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
+
+      pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
+      pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
+      tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
+      tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
+
+      pan_manual = auto_process_data['pan_control_manaul_enabled']
+      pan_auto = auto_process_data['pan_auto_manaul_enabled']
+      tilt_manual = auto_process_data['tilt_control_manaul_enabled']
+      tilt_auto = auto_process_data['tilt_auto_manaul_enabled']
+
+      if pan_manual == True:
+        auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
+      else:
+        auto_pan_error_deg = 0
+
+      # auto_process_data['auto_pan_goal_ratio'] = pantilt_connect_if
+      # auto_process_data['auto_pan_goal_deg'] =
+      auto_process_data['auto_pan_error_deg'] = auto_pan_error_deg
+
+      if tilt_manual == True:
+        auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
+      else:
+        auto_tilt_error_deg = 0
+
+      # auto_process_data['auto_tilt_goal_ratio'] =
+      # auto_process_data['auto_tilt_goal_deg'] =
+      auto_process_data['auto_tilt_error_deg'] = auto_tilt_error_deg
+
+
+    #####################
+    # Apply Process Outputs
+    #####################
+
+
+    #####################
+    # Update Auto Pan Status Values
+
+    self.status_msg.auto_pan_error_deg = auto_process_data['auto_pan_error_deg']
+    self.status_msg.auto_tilt_error_deg = auto_process_data['auto_tilt_error_deg']
+
+    self.publish_status()
+
+
+
+    #####################
+    # Publish Track results
     if track_dict is not None and self.image_connect_if is not None:
       track_msg = Track()
       track_msg.timestamp = nepi_utils.get_time()
@@ -1642,8 +1716,7 @@ class NepiAutoTurretApp(object):
     self.status_msg.show_full_screen = self.show_full_screen
     self.status_msg.show_targets_enabled = self.show_targets_enabled
     self.status_msg.show_track_enabled = self.show_track_enabled
-    self.status_msg.show_crosshair_enabled = self.show_crosshair_enabled
-    self.status_msg.crosshair_offset_degs = self.crosshair_offset_degs
+    self.status_msg.show_goal_enabled = self.show_goal_enabled
 
     # check == False means publish unconditionally, not skip the publish. The
     # earlier form was 'changed AND check == True', which made the check = False

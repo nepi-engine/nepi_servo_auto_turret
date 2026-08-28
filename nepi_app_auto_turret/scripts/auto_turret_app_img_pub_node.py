@@ -91,8 +91,8 @@ class AutoTurretImgPub:
     last_track_time = 0
     show_track_enabled = False
 
-    crosshair_offset_degs = [0,0]
-    show_crosshair_enabled = False
+    goal_error_degs = [0,0]
+    show_goal_enabled = False
 
     # Per-frame-size render constants, built once per size instead of once per
     # frame. Written and read only by the single render thread.
@@ -595,10 +595,10 @@ class AutoTurretImgPub:
                 self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
 
 
-            draw_crosshair = (self.show_crosshair_enabled == True)
+            draw_crosshair = (self.show_goal_enabled == True)
             try:
                 if draw_crosshair == True:
-                    [x_deg,y_deg] = copy.deepcopy(self.crosshair_offset_degs)
+                    [x_deg,y_deg] = copy.deepcopy(self.goal_error_degs)
                     self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Move Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
                 if self.draw_crosshair != draw_crosshair:
                     if draw_crosshair == True:
@@ -792,8 +792,8 @@ class AutoTurretImgPub:
 
         self.show_targets_enabled = msg.show_targets_enabled
         self.show_track_enabled = msg.show_track_enabled
-        self.show_crosshair_enabled = msg.show_crosshair_enabled
-        self.crosshair_offset_degs = msg.crosshair_offset_degs
+        self.show_goal_enabled = msg.show_goal_enabled
+        self.goal_error_degs = [msg.auto_pan_error_deg, msg.auto_tilt_error_deg]
 
 
 

@@ -52,7 +52,7 @@ bool stabilize_ready
 bool stabilize_enabled
 string stab_process_namespace
 
-#############################
+
 bool pan_control_manaul_enabled
 bool tilt_control_manaul_enabled
 
@@ -62,12 +62,16 @@ bool tilt_control_auto_enabled
 bool pan_control_disabled
 bool tilt_control_disabled
 
-float32 auto_pan_ratio
-float32 auto_tilt_ratio
 
-float32 auto_pan_deg
-float32 auto_tilt_deg
+#############################
+float32 auto_pan_goal_ratio
+float32 auto_tilt_goal_ratio
 
+float32 auto_pan_goal_deg
+float32 auto_tilt_goal_deg
+
+float32 auto_pan_error_deg
+float32 auto_tilt_error_deg
 
 ##############
 # Image Pub Info
@@ -76,5 +80,5 @@ string image_pub_topic
 bool show_full_screen
 bool show_targets_enabled
 bool show_track_enabled
-bool show_crosshair_enabled
+bool show_goal_enabled
 float32[] crosshair_offset_degs
