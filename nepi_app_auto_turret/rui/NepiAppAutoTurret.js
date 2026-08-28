@@ -1166,6 +1166,9 @@ class NepiAppAutoTurret extends Component {
         />
         : null}
 
+
+
+
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
           select_title={"Pan Tilt"}
