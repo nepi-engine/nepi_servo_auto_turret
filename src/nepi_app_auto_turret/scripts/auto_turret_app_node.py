@@ -100,6 +100,11 @@ PROCESS_KEYS = [AUTO_PROCESS, SCAN_PROCESS, TRACK_PROCESS, STAB_PROCESS]
 # clears every mode listed after it that the controller would force off.
 MODE_PROCESS_KEYS = [STAB_PROCESS, TRACK_PROCESS, SCAN_PROCESS]
 
+# MODE-COUPLING-DISABLED
+# Coupling 2 of 3: the PROCESS_CLEARS table. Restoring its consuming loop in
+# setProcessEnable() makes enabling stabilize clear tracking and scanning again.
+# The constant is left defined and unreferenced on purpose so the priority table
+# survives the decoupling pass and only the consumer has to be uncommented.
 # Enabling stabilize forces scanning and tracking off, because pt_auto_2 writes
 # that back into the data dict anyway. Doing it here keeps the reported state
 # from disagreeing with what the controller will do.
@@ -111,6 +116,10 @@ PROCESS_CLEARS = {
 # is enabled and not running, and says so. Reporting running = enabled here
 # would put a green Running indicator on a loop that does not exist.
 PROCESS_NOT_RUNNING_MSG = 'Enabled. Control loop not yet wired; no axis is driven.'
+
+# Ready is advisory. A process may be enabled while its sources are missing, so
+# this is reported alongside the enable rather than used to refuse one.
+PROCESS_NOT_READY_MSG = 'Not ready. Required source not connected.'
 
 
 class NepiAutoTurretApp(object):
@@ -233,13 +242,19 @@ class NepiAutoTurretApp(object):
 
 
 
-    self.auto_process_namespace = self.node_namespace + '/' + self.auto_process_name
+    # Built with the same helper ProcessIF uses (create_namespace on the node
+    # namespace and the process name), not by hand-concatenating a slash. These
+    # four strings are what AutoTurretStatus reports as *_process_namespace and
+    # what the RUI mounts each process's controls and data block on, so they
+    # have to resolve to the same string ProcessIF advertises its status topic
+    # under or the RUI subscribes to a topic that does not exist.
+    self.auto_process_namespace = nepi_sdk.create_namespace(self.node_namespace, self.auto_process_name)
 
-    self.scan_process_namespace = self.node_namespace + '/' + self.scan_process_name
+    self.scan_process_namespace = nepi_sdk.create_namespace(self.node_namespace, self.scan_process_name)
 
-    self.track_process_namespace = self.node_namespace + '/' + self.track_process_name
-    
-    self.stab_process_namespace = self.node_namespace + '/' + self.stab_process_name
+    self.track_process_namespace = nepi_sdk.create_namespace(self.node_namespace, self.track_process_name)
+
+    self.stab_process_namespace = nepi_sdk.create_namespace(self.node_namespace, self.stab_process_name)
 
 
     # Every connector is seeded here, before node_if setup, because
@@ -1154,31 +1169,42 @@ class NepiAutoTurretApp(object):
       self.msg_if.pub_warn("Unknown process: " + str(process_key))
       return False
 
-    if enabled == True and self.getProcessReady(process_key) == False:
-      self.msg_if.pub_warn("Process not ready; ignoring enable: " + str(process_key))
-      # Re-report so a toggle that was clicked optimistically falls back.
-      self.publishProcessRunStates()
-      self.publish_status()
-      return False
+    # MODE-COUPLING-DISABLED
+    # Coupling 1 of 3: the ready refusal branch. Restoring it makes an enable
+    # fail whenever getProcessReady() is False, which on the bench is every mode
+    # but auto. Ready is advisory now -- still computed, still published in
+    # AutoTurretStatus, still shown in the RUI as an indicator, never a refusal.
+    # if enabled == True and self.getProcessReady(process_key) == False:
+    #   self.msg_if.pub_warn("Process not ready; ignoring enable: " + str(process_key))
+    #   # Re-report so a toggle that was clicked optimistically falls back.
+    #   self.publishProcessRunStates()
+    #   self.publish_status()
+    #   return False
 
     self.msg_if.pub_info("Setting process enable: " + str(process_key) + " to: " + str(enabled))
     self.storeProcessEnabled(process_key, enabled)
 
-    if enabled == True:
-      # pt_auto_2 forces the lower-priority modes off anyway and writes that
-      # back; clearing them here keeps the reported state from disagreeing.
-      for cleared_key in PROCESS_CLEARS.get(process_key, []):
-        if self.getProcessEnabled(cleared_key) == True:
-          self.msg_if.pub_info("Clearing process, superseded by " + str(process_key) + ": " + str(cleared_key))
-          self.storeProcessEnabled(cleared_key, False)
-    elif process_key == AUTO_PROCESS:
-      # Dropping the supervisor drops every mode with it. Leaving a mode
-      # enabled under a disabled supervisor reports an armed state that
-      # nothing can act on.
-      for mode_key in MODE_PROCESS_KEYS:
-        if self.getProcessEnabled(mode_key) == True:
-          self.msg_if.pub_info("Clearing process, auto supervisor disabled: " + str(mode_key))
-          self.storeProcessEnabled(mode_key, False)
+    # MODE-COUPLING-DISABLED
+    # Coupling 2 of 3: the PROCESS_CLEARS consuming loop. Restoring it makes
+    # enabling stabilize clear tracking and scanning.
+    # if enabled == True:
+    #   # pt_auto_2 forces the lower-priority modes off anyway and writes that
+    #   # back; clearing them here keeps the reported state from disagreeing.
+    #   for cleared_key in PROCESS_CLEARS.get(process_key, []):
+    #     if self.getProcessEnabled(cleared_key) == True:
+    #       self.msg_if.pub_info("Clearing process, superseded by " + str(process_key) + ": " + str(cleared_key))
+    #       self.storeProcessEnabled(cleared_key, False)
+    # MODE-COUPLING-DISABLED
+    # Coupling 3 of 3: the supervisor cascade. Restoring it makes disabling auto
+    # clear scanning, tracking and stabilize with it.
+    # elif process_key == AUTO_PROCESS:
+    #   # Dropping the supervisor drops every mode with it. Leaving a mode
+    #   # enabled under a disabled supervisor reports an armed state that
+    #   # nothing can act on.
+    #   for mode_key in MODE_PROCESS_KEYS:
+    #     if self.getProcessEnabled(mode_key) == True:
+    #       self.msg_if.pub_info("Clearing process, auto supervisor disabled: " + str(mode_key))
+    #       self.storeProcessEnabled(mode_key, False)
 
     self.applyAxisOwnership()
     self.publishProcessRunStates()
@@ -1234,12 +1260,18 @@ class NepiAutoTurretApp(object):
         continue
       enabled = self.getProcessEnabled(process_key)
       running = self.getProcessRunning(process_key)
+      ready = self.getProcessReady(process_key)
       if running == True:
         msg_str = ''
       elif enabled == True:
+        # A process can now be enabled while not ready, so both conditions have
+        # to be reportable at once. Enabling is never refused; not-ready is a
+        # state the operator is shown, not a reason the click did not take.
         msg_str = PROCESS_NOT_RUNNING_MSG
-      elif self.getProcessReady(process_key) == False:
-        msg_str = 'Not ready. Required source not connected.'
+        if ready == False:
+          msg_str = PROCESS_NOT_READY_MSG + ' ' + PROCESS_NOT_RUNNING_MSG
+      elif ready == False:
+        msg_str = PROCESS_NOT_READY_MSG
       else:
         msg_str = ''
       process_if.set_process_running(running, msg_str = msg_str)
@@ -1250,21 +1282,34 @@ class NepiAutoTurretApp(object):
     return False
 
   def auditProcessEnables(self):
+    # MODE-COUPLING-DISABLED
+    # Coupling 1 of 3, second half: the periodic ready drop. This runs once a
+    # second from updaterCb, so with it in place a mode enabled while not ready
+    # is switched back off within a second of the click -- the refusal branch in
+    # setProcessEnable() is not the only thing that has to come out for the four
+    # toggles to hold. Restoring it re-arms the automatic drop.
     # Auto first: dropping the supervisor clears the modes in the same pass, so
     # auditing it first avoids reporting a mode as independently lost.
-    dropped = False
-    for process_key in PROCESS_KEYS:
-      if self.getProcessEnabled(process_key) == False:
-        continue
-      if self.getProcessReady(process_key) == True:
-        continue
-      self.msg_if.pub_warn("Process no longer ready; disabling: " + str(process_key))
-      self.setProcessEnable(process_key, False)
-      dropped = True
-    if dropped == False:
-      # setProcessEnable already did both on the drop path.
-      self.applyAxisOwnership()
-      self.publishProcessRunStates()
+    # dropped = False
+    # for process_key in PROCESS_KEYS:
+    #   if self.getProcessEnabled(process_key) == False:
+    #     continue
+    #   if self.getProcessReady(process_key) == True:
+    #     continue
+    #   self.msg_if.pub_warn("Process no longer ready; disabling: " + str(process_key))
+    #   self.setProcessEnable(process_key, False)
+    #   dropped = True
+    # if dropped == False:
+    #   # setProcessEnable already did both on the drop path.
+    #   self.applyAxisOwnership()
+    #   self.publishProcessRunStates()
+
+    # Axis ownership and the per-process run states still have to be refreshed
+    # every cycle: readiness moves on its own as sources connect and drop, and
+    # publishProcessRunStates() is what carries that into each ProcessStatus.
+    # Only the automatic disable above is gone.
+    self.applyAxisOwnership()
+    self.publishProcessRunStates()
 
   ###############################
   # Overlay Control Callbacks
@@ -1493,6 +1538,14 @@ class NepiAutoTurretApp(object):
 
     Called on the status timer and after every accepted command so the RUI and
     the child image publisher node both see a change immediately.
+
+    Args:
+        check (bool, optional): True publishes only when the message changed,
+            which is what a command callback wants. False publishes
+            unconditionally, which is what the 1 Hz status timer wants -- the
+            child image publisher node's watchdog shuts that node down after
+            WATCHDOG_TIMEOUT seconds without a status message, so the heartbeat
+            has to go out whether or not anything moved.
     """
     if self.node_if is None:
       return
@@ -1592,7 +1645,13 @@ class NepiAutoTurretApp(object):
     self.status_msg.show_crosshair_enabled = self.show_crosshair_enabled
     self.status_msg.crosshair_offset_degs = self.crosshair_offset_degs
 
-    if last_status_msg != self.status_msg and check == True:
+    # check == False means publish unconditionally, not skip the publish. The
+    # earlier form was 'changed AND check == True', which made the check = False
+    # call from statusPublishCb a no-op: the 1 Hz heartbeat this node's own
+    # STATUS_PUBLISH_RATE_HZ comment calls a contract never went out, the child
+    # image publisher node's watchdog starved after WATCHDOG_DELAY, and the
+    # overlay topic the app's image viewer displays stopped existing.
+    if check == False or last_status_msg != self.status_msg:
       self.node_if.publish_pub('status_pub', self.status_msg)
 
 
