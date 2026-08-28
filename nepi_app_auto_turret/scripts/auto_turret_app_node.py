@@ -1447,7 +1447,7 @@ class NepiAutoTurretApp(object):
   ## Auto Process Udpater
 
   def processCb(self, timer):
-    
+    self.msg_if.pub_warn("Starting Process Thread")
     start_time = nepi_utils.get_time()
     #####################
     # Setup Process Inputs
@@ -1497,7 +1497,8 @@ class NepiAutoTurretApp(object):
       [track_dict, tracking_dict] = nepi_targets_track.get_best_from_targets(
                                           targets_dict_list,
                                           tracking_dict = nepi_targets_track.BLANK_SETTINGS_DICT)
-    except:
+    except Exception as e:
+      self.msg_if.pub_info("Failed to process auto targets_dict_list: " + str(e))
       pass
 
 
@@ -1553,7 +1554,8 @@ class NepiAutoTurretApp(object):
         # auto_process_data['auto_tilt_goal_ratio'] =
         # auto_process_data['auto_tilt_goal_deg'] =
         auto_process_data['auto_tilt_error_deg'] = auto_tilt_error_deg
-      except:
+      except Exception as e:
+        self.msg_if.pub_info("Failed to process auto pt errors: " + str(e))
         pass
 
     #####################
@@ -1567,16 +1569,17 @@ class NepiAutoTurretApp(object):
     self.status_msg.auto_pan_error_deg = auto_process_data['auto_pan_error_deg']
     self.status_msg.auto_tilt_error_deg = auto_process_data['auto_tilt_error_deg']
 
-    self.publish_status()
+
 
 
 
     #####################
     # Publish Track results
 
+    track_msg = Track()
     if track_dict is not None and self.image_connect_if is not None:
         try:
-            track_msg = Track()
+            
             track_msg.timestamp = nepi_utils.get_time()
             track_msg.process_name = self.node_name
             track_msg.process_namespace = self.node_namespace
@@ -1586,9 +1589,15 @@ class NepiAutoTurretApp(object):
             track_msg.target = target_msg
             #self.msg_if.pub_info("Publishing track mgs: " + str(track_msg), throttle_s = 5)
             self.node_if.publish_pub('track_pub', track_msg)
-        except:
+        except Exception as e:
+          self.msg_if.pub_info("Failed to process track_dict: " + str(e))
           pass
-        
+
+
+
+    #############################
+    # Publish Status and Set Next Process
+    self.publish_status()
     max_hz = self.max_process_rate_hz
     if max_hz < 1:
       max_hz = 1
@@ -1597,6 +1606,7 @@ class NepiAutoTurretApp(object):
     # Re-arm this loop, not updaterCb. Re-arming the updater here ran the
     # process body exactly once and then drove the 1 Hz updater at the process
     # rate instead.
+    self.msg_if.pub_info("Auto Pan Error: Track Pan Error: Next Time: Track Dict " + str([auto_process_data['auto_tilt_error_deg'], track_msg.azimuth_deg, next_process_delay, track_dict]), throttle_s = 5)
     nepi_sdk.start_timer_process(next_process_delay, self.processCb, oneshot = True)
 
 
