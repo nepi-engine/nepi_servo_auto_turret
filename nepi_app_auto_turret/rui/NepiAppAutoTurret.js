@@ -1040,49 +1040,6 @@ class NepiAppAutoTurret extends Component {
           <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
 
 
-        <NepiIFConnectPTX
-          namespace={app_namespace + "/ptx_connect"}
-          select_title={"Pan Tilt"}
-          show_selector={true}
-          show_controls={false}
-          show_settings={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        <NepiIFConnectData
-          namespace={app_namespace + "/image_connect"}
-          select_title={"Image"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        <NepiIFConnectTargets
-          namespace={app_namespace + "/targets_connect"}
-          select_title={"Targets"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        {/* Fourth source row, same shape as the three above. No select_title
-            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
-            "NavPose Source" and does not read select_title, so passing one
-            would be dead weight. Its default (non-shortened, no connect header)
-            layout is the same selector-plus-Connected-indicator pair the other
-            three rows render, which is why this row carries no BooleanIndicator
-            of its own. */}
-        <NepiIFConnectNavPose
-          namespace={app_namespace + "/navpose_connect"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
-
 
         <SliderAdjustment
           title={"Max Process Rate"}
@@ -1209,7 +1166,49 @@ class NepiAppAutoTurret extends Component {
         />
         : null}
 
+        <NepiIFConnectPTX
+          namespace={app_namespace + "/ptx_connect"}
+          select_title={"Pan Tilt"}
+          show_selector={true}
+          show_controls={false}
+          show_settings={false}
+          show_data={false}
+          make_section={false}
+        />
 
+        <NepiIFConnectData
+          namespace={app_namespace + "/image_connect"}
+          select_title={"Image"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        <NepiIFConnectTargets
+          namespace={app_namespace + "/targets_connect"}
+          select_title={"Targets"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        {/* Fourth source row, same shape as the three above. No select_title
+            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
+            "NavPose Source" and does not read select_title, so passing one
+            would be dead weight. Its default (non-shortened, no connect header)
+            layout is the same selector-plus-Connected-indicator pair the other
+            three rows render, which is why this row carries no BooleanIndicator
+            of its own. */}
+        <NepiIFConnectNavPose
+          namespace={app_namespace + "/navpose_connect"}
+          select_title={"NavPose"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
 
             </React.Fragment>
         )
