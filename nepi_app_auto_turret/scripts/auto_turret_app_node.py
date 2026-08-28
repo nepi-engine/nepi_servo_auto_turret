@@ -1486,23 +1486,15 @@ class NepiAutoTurretApp(object):
 
     #####################
     # Run Track Process
-    if targets_dict_list is not None and len(targets_dict_list) > 0:
-      track_dict = targets_dict_list[0]
-    # if len(targets_dict_list) == 0 or self.track_process_if is None:
-    #   return
-    # [best_target, tracking_dict] = nepi_targets_track.get_best_from_targets(
-    #                                     targets_dict_list,
-    #                                     tracking_dict = self.tracking_dict)
-    # self.tracking_dict = tracking_dict
-    # if best_target is None:
-    #   return
-    # try:
-    #   target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, best_target)
-    # except Exception as e:
-    #   self.msg_if.pub_warn("Failed to rebuild target message: " + str(e))
-    #   return
-    # if target_msg is None:
-    #   return
+    # if targets_dict_list is not None and len(targets_dict_list) > 0:
+    #   track_dict = targets_dict_list[0]
+    if len(targets_dict_list) == 0 or self.track_process_if is None:
+      return
+    [track_dict, tracking_dict] = nepi_targets_track.get_best_from_targets(
+                                        targets_dict_list,
+                                        tracking_dict = nepi_targets_track.BLANK_SETTINGS_DICT)
+    self.tracking_dict = tracking_dict
+
 
 
 
