@@ -241,7 +241,8 @@ class AutoTurretImgPub:
                         msg_if = self.msg_if)
 
         nepi_sdk.sleep(1)
-
+        self.img_if.clear_targets()
+        self.img_if.clear_crosshairs()
 
         ##########################
         # Complete Initialization
@@ -604,7 +605,7 @@ class AutoTurretImgPub:
                         self.img_if.set_crosshairs_size_ratio(0.4)
                         self.img_if.set_crosshairs_thickness_ratio(0.4)
                     else:
-                        self.img_if.remove_target('Move Goal')
+                        self.img_if.remove_crosshair('Move Goal')
                     self.img_if.set_crosshairs_enable(draw_crosshair)
                     self.draw_crosshair = draw_crosshair
             except Exception as e:
