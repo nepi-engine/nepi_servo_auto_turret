@@ -643,6 +643,7 @@ class NepiAutoTurretApp(object):
                 process_data_dict = self.track_process_data,
                 process_controls_dict = self.track_process_controls,
                 results_msg = Track,
+                results_name = 'track',
                 show_controls = True,
                 show_data = True,
                 show_results = True,
