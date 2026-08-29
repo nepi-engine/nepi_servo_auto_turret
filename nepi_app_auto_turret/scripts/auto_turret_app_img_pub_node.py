@@ -184,7 +184,7 @@ class AutoTurretImgPub:
             },
             'auto_turret_track_sub': {
                 'msg': Track,
-                'namespace': self.process_namespace,
+                'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
                 'callback': self.trackCb,
@@ -587,6 +587,8 @@ class AutoTurretImgPub:
                     if draw_track == True:
                         self.img_if.set_targets_size_ratio(0.4)
                         self.img_if.set_targets_thickness_ratio(0.4)
+                        self.img_if.set_targets_text_ratio(0.3)
+                        self.img_if.set_overlay_target_degrees(True)
                     else:
                         self.img_if.remove_target('Track Goal')
                     self.img_if.set_targets_enable(draw_track)
@@ -604,6 +606,8 @@ class AutoTurretImgPub:
                     if draw_crosshair == True:
                         self.img_if.set_crosshairs_size_ratio(0.4)
                         self.img_if.set_crosshairs_thickness_ratio(0.4)
+                        self.img_if.set_crosshairs_text_ratio(0.3)
+                        self.img_if.set_overlay_crosshair_degrees(True)
                     else:
                         self.img_if.remove_crosshair('Move Goal')
                     self.img_if.set_crosshairs_enable(draw_crosshair)

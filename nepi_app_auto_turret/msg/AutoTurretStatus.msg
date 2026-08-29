@@ -81,4 +81,4 @@ bool show_full_screen
 bool show_targets_enabled
 bool show_track_enabled
 bool show_goal_enabled
-float32[] crosshair_offset_degs
+

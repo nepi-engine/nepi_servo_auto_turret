@@ -95,8 +95,6 @@ class NepiAppAutoTurret extends Component {
 
     this.getBaseNamespace = this.getBaseNamespace.bind(this)
     this.getAppNamespace = this.getAppNamespace.bind(this)
-    this.getProcessNamespace = this.getProcessNamespace.bind(this)
-    this.getControlsNamespace = this.getControlsNamespace.bind(this)
     this.getSaveNamespace = this.getSaveNamespace.bind(this)
 
     this.statusListener = this.statusListener.bind(this)
@@ -108,7 +106,7 @@ class NepiAppAutoTurret extends Component {
     this.onStopClick = this.onStopClick.bind(this)
     this.renderApp = this.renderApp.bind(this)
     this.renderAutoSettings = this.renderAutoSettings.bind(this)
-    this.renderPTAuto = this.renderPTAuto.bind(this)
+    this.renderPTButtons = this.renderPTButtons.bind(this)
     this.renderPTControls = this.renderPTControls.bind(this)
     this.renderImageViewer = this.renderImageViewer.bind(this)
     this.rendeAutoControls = this.rendeAutoControls.bind(this)
@@ -137,21 +135,7 @@ class NepiAppAutoTurret extends Component {
     return appNamespace
   }
 
-  // Namespace every auto_turret command topic hangs off. Prefer what the node
-  // reports so the two can never drift; fall back to the conventional path.
-  getProcessNamespace() {
-    const appNamespace = this.getAppNamespace()
-    return appNamespace
-  }
 
-  getControlsNamespace() {
-    const status_msg = this.state.status_msg
-    if (status_msg != null && status_msg.controls_topic) {
-      return status_msg.controls_topic
-    }
-    const appNamespace = this.getAppNamespace()
-    return (appNamespace != null) ? appNamespace + "/controls" : null
-  }
 
   getSaveNamespace() {
     const status_msg = this.state.status_msg
@@ -210,12 +194,12 @@ class NepiAppAutoTurret extends Component {
   }
 
   componentDidUpdate(prevProps, prevState, snapshot) {
-    const namespace = this.getAppNamespace()
-    const namespace_updated = (this.state.appNamespace !== namespace && namespace !== null)
+    const app_namespace = this.getAppNamespace()
+    const namespace_updated = (this.state.appNamespace !== app_namespace && app_namespace !== null)
     if (namespace_updated || this.state.needs_update === true) {
-      if (namespace !== null && namespace.indexOf('null') === -1) {
+      if (app_namespace !== null && app_namespace.indexOf('null') === -1) {
         this.setState({ needs_update: false })
-        this.updateStatusListener(namespace)
+        this.updateStatusListener(app_namespace)
       }
     }
   }
@@ -261,13 +245,8 @@ class NepiAppAutoTurret extends Component {
 
     const status_msg = this.state.status_msg
 
-    const process_namespace = this.getProcessNamespace()
-    const controls_namespace = this.getControlsNamespace()
-    // Each connector registers under <node namespace>/<connect_name>.
     const app_namespace = this.getAppNamespace()
 
-    const max_process_rate_hz = status_msg.max_process_rate_hz
-    const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
 
     const auto_select_active = status_msg.auto_select_enabled
     const pantilt_connected = status_msg.pantilt_connected
@@ -282,33 +261,11 @@ class NepiAppAutoTurret extends Component {
     const stabilize_ready = status_msg.stabilize_ready
     const stabilize_enabled = status_msg.stabilize_enabled
 
-    const pan_control_disabled = status_msg.pan_control_disabled
-    const tilt_control_disabled = status_msg.tilt_control_disabled
-
-    const speed_ratio = status_msg.speed_ratio
-    const pan_speed_ratio = status_msg.pan_speed_ratio
-    const tilt_speed_ratio = status_msg.tilt_speed_ratio
-
-    const pan_deg = status_msg.pan_deg
-    const tilt_deg = status_msg.tilt_deg
-
-    const pan_goal = status_msg.pan_goal
-    const tilt_goal = status_msg.tilt_goal
-
-    const pan_deg_per_sec = status_msg.pan_deg_per_sec
-    const tilt_deg_per_sec = status_msg.tilt_deg_per_sec
-
-    const pan_goto = status_msg.pan_goto
-    const tilt_goto = status_msg.tilt_goto
-
 
 
     return (
       <Columns>
       <Column>
-
-
-
 
 
         <Columns>
@@ -319,77 +276,12 @@ class NepiAppAutoTurret extends Component {
             <Label title="Auto Select Enable">
               <AsyncToggle
                 checked={auto_select_active === true}
-                onClick={() => sendBoolMsg(process_namespace + "/set_auto_select_enable", !auto_select_active)}>
+                onClick={() => sendBoolMsg(app_namespace + "/set_auto_select_enable", !auto_select_active)}>
               </AsyncToggle>
             </Label>
 
         </Column>
         </Columns>
-
-
-
-        {/* The four source rows. Each connector owns its own selector,
-            available list, connection indicator and status readout, published
-            as a ConnectIFStatus on its own connect namespace -- see the
-            Connect*IF instances in auto_turret_app_node.py. This page only
-            points each component at the right namespace.
-
-            show_data is off on all four on purpose. The connectors still
-            subscribe to their ConnectIFStatus and still drive the selector and
-            the connection indicator; show_data only suppresses the detailed
-            readout child (NepiIFPTXData and friends), which duplicated a full
-            device dashboard -- position, goal, speed, soft and hard limits,
-            home, reverse -- inside this app's side panel. The condensed STATUS
-            block further down is what this page reports instead. Turn one back
-            on only if this page needs that device's full readout. */}
-
-        {/* Controls on, but settings and admin off. NepiIFPTXControls renders
-            the connected device's full Device Settings and Advanced Settings
-            panels alongside the pan/tilt command widgets, and both default to
-            true. Those two are a device dashboard, not app controls, and would
-            put back the clutter the show_data change above removed. */}
-        <NepiIFConnectPTX
-          namespace={app_namespace + "/ptx_connect"}
-          select_title={"Pan Tilt"}
-          show_selector={true}
-          show_controls={false}
-          show_settings={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        <NepiIFConnectData
-          namespace={app_namespace + "/image_connect"}
-          select_title={"Image"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        <NepiIFConnectTargets
-          namespace={app_namespace + "/targets_connect"}
-          select_title={"Targeter"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
-
-        {/* Fourth source row, same shape as the three above. No select_title
-            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
-            "NavPose Source" and does not read select_title, so passing one
-            would be dead weight. Its default (non-shortened, no connect header)
-            layout is the same selector-plus-Connected-indicator pair the other
-            three rows render, which is why this row carries no BooleanIndicator
-            of its own. */}
-        <NepiIFConnectNavPose
-          namespace={app_namespace + "/navpose_connect"}
-          show_selector={true}
-          show_controls={false}
-          show_data={false}
-          make_section={false}
-        />
 
 
         <div hidden={pantilt_connected === false}>
@@ -403,7 +295,7 @@ class NepiAppAutoTurret extends Component {
               <AsyncToggle
                 disabled={scanning_ready == false}
                 checked={scanning_enabled === true}
-                onClick={() => sendBoolMsg(process_namespace + "/set_scanning_enable", !scanning_enabled)}>
+                onClick={() => sendBoolMsg(app_namespace + "/set_scanning_enable", !scanning_enabled)}>
               </AsyncToggle>
             </Label>
 
@@ -411,7 +303,7 @@ class NepiAppAutoTurret extends Component {
               <AsyncToggle
                 disabled={tracking_ready == false}
                 checked={tracking_enabled === true}
-                onClick={() => sendBoolMsg(process_namespace + "/set_tracking_enable", !tracking_enabled)}>
+                onClick={() => sendBoolMsg(app_namespace + "/set_tracking_enable", !tracking_enabled)}>
               </AsyncToggle>
             </Label>
 
@@ -420,17 +312,20 @@ class NepiAppAutoTurret extends Component {
               <AsyncToggle
                 disabled={stabilize_ready == false}
                 checked={stabilize_enabled === true}
-                onClick={() => sendBoolMsg(process_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
+                onClick={() => sendBoolMsg(app_namespace + "/set_stabilize_enable", !stabilize_enabled)}>
               </AsyncToggle>
             </Label>
 
           </Column>
           <Column>
+
+          {this.renderPTButtons()}
+
           </Column>
           </Columns>
 
           
-          {this.renderPTAuto()}
+          {this.renderPTControls()}
 
           </div>
 
@@ -480,8 +375,8 @@ class NepiAppAutoTurret extends Component {
   // publishes its own degree command to the app, which gates and forwards.
   onPTKeyText(e) {
     const { sendFloatMsg } = this.props.ros
-    const process_namespace = this.getProcessNamespace()
-    if (process_namespace == null) {
+    const app_namespace = this.getAppNamespace()
+    if (app_namespace == null) {
       return
     }
 
@@ -489,12 +384,12 @@ class NepiAppAutoTurret extends Component {
     const pantilt_namespace = status_msg.selected_pantilt_topic
 
     const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
-    const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
-    const pan_control_pos_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_position'  : process_namespace + '/set_pan_pos_deg'
+    const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+    const pan_control_pos_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_position'  : app_namespace + '/set_pan_pos_deg'
 
     const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
-    const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
-    const tilt_control_pos_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_position'  : process_namespace + '/set_tilt_pos_deg'
+    const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+    const tilt_control_pos_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_position'  : app_namespace + '/set_tilt_pos_deg'
 
     var panElement = null
     var tiltElement = null
@@ -521,34 +416,9 @@ class NepiAppAutoTurret extends Component {
 
 
 
-  // Manual pan tilt block, rendered under the auto mode enables. Gated on the
-  // app's own status, not on the ros store's ptxDevices list: this page talks
-  // only to the app, so what matters is whether the app reports a connected
-  // device -- the RUI's own device discovery is irrelevant here.
-  //
-  // The scan/track/stabilize toggles that used to live in this method are gone.
-  // They were the source app's copies, publishing to set_scan_enable /
-  // set_track_enable / set_stab_enable, none of which this node subscribes to
-  // (the live topics are set_scanning_enable / set_tracking_enable /
-  // set_stabilize_enable, already rendered by renderAutoSettings above).
-  renderPTAuto() {
-    const status_msg = this.state.status_msg
 
-    if (status_msg == null || status_msg.pantilt_connected !== true) {
-      return (
-        <Columns>
-        <Column>
-        </Column>
-        </Columns>
-      )
-    }
-
-    return this.renderPTControls()
-  }
-
-
-  onStopClick(process_namespace, pantilt_namespace) {
-      this.props.ros.sendTriggerMsg(process_namespace + '/pt_stop')
+  onStopClick(app_namespace, pantilt_namespace) {
+      this.props.ros.sendTriggerMsg(app_namespace + '/pt_stop')
       this.props.ros.sendTriggerMsg(pantilt_namespace + '/stop_moving')
 
   }
@@ -558,11 +428,11 @@ class NepiAppAutoTurret extends Component {
   // fields come through status_msg.pantilt_status_msg, which the node fills
   // from the connector, and the ratios the app itself owns come off the top
   // level. Nothing here reads the ros store's ptxDevices.
-  renderPTControls() {
+  renderPTButtons() {
     const status_msg = this.state.status_msg
-    const process_namespace = this.getProcessNamespace()
+    const app_namespace = this.getAppNamespace()
     const pantilt_connected = (status_msg != null) ? status_msg.pantilt_connected : false
-    if (status_msg == null || status_msg.pantilt_connected !== true || process_namespace == null){
+    if (status_msg == null || status_msg.pantilt_connected !== true || app_namespace == null){
       return(
 
         <Columns>
@@ -587,13 +457,13 @@ class NepiAppAutoTurret extends Component {
       const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
       const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
       const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
-      const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
+      const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
 
 
       const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
       const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
       const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
-      const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
+      const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
 
       const panPositionClean = pantilt_status_msg.pan_now_deg + .001
       const tiltPositionClean = pantilt_status_msg.tilt_now_deg + .001
@@ -632,19 +502,19 @@ class NepiAppAutoTurret extends Component {
               pan_home / tilt_home in the node's subscriber dict. */}
           {(has_homing === true && has_seperate_pan_tilt_control === true) ?
             <ButtonMenu>
-              <Button onClick={() => this.onStopClick(process_namespace,pantilt_namespace)}>{"STOP"}</Button>
+              <Button onClick={() => this.onStopClick(app_namespace,pantilt_namespace)}>{"STOP"}</Button>
               <Button disabled={pan_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/pan_home')}>{"P-HOME"}</Button>
               <Button disabled={tilt_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(tilt_control_namespace + '/tilt_home')}>{"T-HOME"}</Button>
             </ButtonMenu>
                   : (has_homing === true) ?
 
                       <ButtonMenu>
-                      <Button onClick={() => this.onStopClick(process_namespace,pantilt_namespace)}>{"STOP"}</Button>
+                      <Button onClick={() => this.onStopClick(app_namespace,pantilt_namespace)}>{"STOP"}</Button>
                       <Button disabled={pan_control_manaul_enabled === false || tilt_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/go_home')}>{"HOME"}</Button>
                     </ButtonMenu>
                     :
                         <ButtonMenu>
-                          <Button onClick={() => this.onStopClick(process_namespace,pantilt_namespace)}>{"STOP"}</Button>
+                          <Button onClick={() => this.onStopClick(app_namespace,pantilt_namespace)}>{"STOP"}</Button>
                         </ButtonMenu>
           }
 
@@ -680,6 +550,83 @@ class NepiAppAutoTurret extends Component {
 
 
                           </ButtonMenu>
+           
+
+            </React.Fragment>
+        )
+  }
+}
+
+
+
+
+  renderPTControls() {
+    const status_msg = this.state.status_msg
+    const app_namespace = this.getAppNamespace()
+    const pantilt_connected = (status_msg != null) ? status_msg.pantilt_connected : false
+    if (status_msg == null || status_msg.pantilt_connected !== true || app_namespace == null){
+      return(
+
+        <Columns>
+        <Column>
+
+        </Column>
+        </Columns>
+
+      )
+
+    }
+    else {
+      const { onPTXJogPan, onPTXJogTilt, onPTXJogSpeedPan, onPTXJogSpeedTilt, onPTXStop, onPTXPanStop, onPTXTiltStop } = this.props.ros
+      const pantilt_namespace = status_msg.selected_pantilt_topic
+      const pantilt_status_msg = status_msg.pantilt_status_msg
+      const has_abs_pos = (pantilt_status_msg.has_absolute_positioning === true)
+      const has_homing = (pantilt_status_msg.has_homing === true)
+      const has_seperate_pan_tilt_control = (pantilt_status_msg.has_seperate_pan_tilt_control === true)
+      const has_seperate_pan_tilt_speed = (pantilt_status_msg.has_seperate_pan_tilt_control === true)
+      const has_speed_control = (pantilt_status_msg.has_adjustable_speed === true)
+
+      const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
+      const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
+      const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
+      const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+
+
+      const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
+      const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
+      const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
+      const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+
+      const panPositionClean = pantilt_status_msg.pan_now_deg + .001
+      const tiltPositionClean = pantilt_status_msg.tilt_now_deg + .001
+
+      const panCurSpeedClean = pantilt_status_msg.speed_pan_dps + .001
+      const tiltCurSpeedClean = pantilt_status_msg.speed_tilt_dps + .001
+
+      // The app's own stored ratios, which it pushes to the device on connect.
+      const speedPanRatio = pantilt_status_msg.speed_pan_ratio
+      const speedTiltRatio = pantilt_status_msg.speed_tilt_ratio
+      const speedPanTiltRatio = pantilt_status_msg.speed_ratio
+
+      // pan_tilt_max_speed_dps is UNSET_VALUE (-999) until the app has a
+      // connected device to ask, which would render a negative dps readout;
+      // fall back to what the device reports for itself.
+      const maxSpeed = pantilt_status_msg.speed_max_dps
+      const panSetSpeed = speedPanRatio * maxSpeed
+      const tiltSetSpeed = speedTiltRatio * maxSpeed
+
+      const panSetSpeedClean = panSetSpeed + .001
+      const tiltSetSpeedClean = tiltSetSpeed + .001
+
+
+        // Editable values for the (commented out) GoTo inputs. They live in state
+        // so typing can hold; statusListener seeds and reseeds them, because a
+        // setState from inside render loops.
+        const pan_pos = this.state.panGoto
+        const tilt_pos = this.state.tiltGoto
+
+        return (
+          <React.Fragment>
            
 
           <Label title={""} style={{fontWeight: 'bold'}} align={"left"} textAlign={"left"}>
@@ -824,15 +771,10 @@ class NepiAppAutoTurret extends Component {
 
 
 
-
-
-
-
-
   renderImageViewer() {
     const { sendBoolMsg, imageTopics } = this.props.ros
     const status_msg = this.state.status_msg
-    const process_namespace = this.getProcessNamespace()
+    const app_namespace = this.getAppNamespace()
     const save_data_topic = this.getSaveNamespace()
     const image_connected = (status_msg !== null) ? (status_msg.image_connected === true) : false
 
@@ -862,7 +804,7 @@ class NepiAppAutoTurret extends Component {
         const full_screen_enabled = status_msg.show_full_screen
         const show_targets_enabled = status_msg.show_targets_enabled
         const show_track_enabled = status_msg.show_track_enabled
-        const show_crosshair_enabled = status_msg.show_crosshair_enabled
+        const show_goal_enabled = status_msg.show_goal_enabled
 
 
         const pantilt_namespace = status_msg.selected_pantilt_topic
@@ -874,22 +816,22 @@ class NepiAppAutoTurret extends Component {
         const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
         const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
         const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
-        const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
+        const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
         var pan_goal_ratio = 0.5
         if (pantilt_connected === true) {
             pan_goal_ratio = (pan_control_manaul_enabled === true) ? pantilt_status_msg.pan_goal_ratio : status_msg.auto_pan_ratio 
         }
-        const pan_slider_topic = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_ratio'  : process_namespace + '/set_pan_pos_ratio'
+        const pan_slider_topic = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_ratio'  : app_namespace + '/set_pan_pos_ratio'
 
         const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
         const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
         const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
-        const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : process_namespace
+        const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
         var tilt_goal_ratio = 0.5
         if (pantilt_connected === true) {
             tilt_goal_ratio = (tilt_control_manaul_enabled === true) ? pantilt_status_msg.tilt_goal_ratio : status_msg.auto_tilt_ratio 
         }
-        const tilt_slider_topic = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_ratio'  : process_namespace + '/set_tilt_pos_ratio'
+        const tilt_slider_topic = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_ratio'  : app_namespace + '/set_tilt_pos_ratio'
 
         // Match the tilt slider to the rendered viewer height. offsetHeight is read
         // off the previous paint, so the first render has no element yet and comes
@@ -912,7 +854,7 @@ class NepiAppAutoTurret extends Component {
                                 <Label title="Full Screen">
                                   <AsyncToggle
                                     checked={full_screen_enabled === true}
-                                    onClick={() => sendBoolMsg(process_namespace + "/set_full_screen", full_screen_enabled === false)}>
+                                    onClick={() => sendBoolMsg(app_namespace + "/set_full_screen", full_screen_enabled === false)}>
                                   </AsyncToggle>
                                 </Label>
                             </div>
@@ -930,7 +872,7 @@ class NepiAppAutoTurret extends Component {
                                 <Label title="Show Targets">
                                   <AsyncToggle
                                     checked={show_targets_enabled === true}
-                                    onClick={() => sendBoolMsg(process_namespace + "/set_show_targets", show_targets_enabled === false)}>
+                                    onClick={() => sendBoolMsg(app_namespace + "/set_show_targets", show_targets_enabled === false)}>
                                   </AsyncToggle>
                                 </Label>
 
@@ -946,7 +888,7 @@ class NepiAppAutoTurret extends Component {
                               <Label title="Show Track">
                                 <AsyncToggle
                                   checked={show_track_enabled === true}
-                                  onClick={() => sendBoolMsg(process_namespace + "/set_show_track", show_track_enabled === false)}>
+                                  onClick={() => sendBoolMsg(app_namespace + "/set_show_track", show_track_enabled === false)}>
                                 </AsyncToggle>
                               </Label>
 
@@ -962,8 +904,8 @@ class NepiAppAutoTurret extends Component {
 
                   <Label title="Show Goal">
                     <AsyncToggle
-                      checked={show_crosshair_enabled === true}
-                      onClick={() => sendBoolMsg(process_namespace + "/set_show_crosshair", show_crosshair_enabled === false)}>
+                      checked={show_goal_enabled === true}
+                      onClick={() => sendBoolMsg(app_namespace + "/set_show_crosshair", show_goal_enabled === false)}>
                     </AsyncToggle>
                   </Label>
 
@@ -1064,12 +1006,12 @@ class NepiAppAutoTurret extends Component {
 
   rendeAutoControls() {
    
-    const process_namespace = this.getProcessNamespace()
+    const app_namespace = this.getAppNamespace()
 
     const status_msg = this.state.status_msg
 
 
-    if (status_msg == null || process_namespace == null){
+    if (status_msg == null || app_namespace == null){
       return(
 
         <Columns>
@@ -1094,7 +1036,37 @@ class NepiAppAutoTurret extends Component {
           <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
 
 
-          <Label title={"Controls"}></Label>
+
+        <SliderAdjustment
+          title={"Max Process Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_process_rate_hz}
+          topic={app_namespace + "/set_max_process_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets process max rate in hz"}
+          unit={"Hz"}
+        />
+
+
+        <SliderAdjustment
+          title={"Max Image Publish Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_image_pub_rate_hz}
+          topic={app_namespace + "/set_max_image_pub_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets overlay image max publish rate in hz"}
+          unit={"Hz"}
+        />
+
+
+
+          <Label title={"Settings"}></Label>
 
                   <div style={{ display: 'flex' }} >
                     <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
@@ -1181,36 +1153,6 @@ class NepiAppAutoTurret extends Component {
 
 
 
-      { ( show_control === 'auto' ) ?
-
-        <SliderAdjustment
-          title={"Max Process Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_process_rate_hz}
-          topic={process_namespace + "/set_max_process_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets process max rate in hz"}
-          unit={"Hz"}
-        />
-        : null}
-
-      { ( show_control === 'auto' ) ?
-        <SliderAdjustment
-          title={"Max Image Publish Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_image_pub_rate_hz}
-          topic={process_namespace + "/set_max_image_pub_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets overlay image max publish rate in hz"}
-          unit={"Hz"}
-        />
-        : null}
 
       { ( show_control === 'auto' ) ?
       <Nepi_IF_ConnectProcess
@@ -1221,6 +1163,51 @@ class NepiAppAutoTurret extends Component {
         : null}
 
 
+
+
+        <NepiIFConnectPTX
+          namespace={app_namespace + "/ptx_connect"}
+          select_title={"Pan Tilt"}
+          show_selector={true}
+          show_controls={false}
+          show_settings={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        <NepiIFConnectData
+          namespace={app_namespace + "/image_connect"}
+          select_title={"Image"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        <NepiIFConnectTargets
+          namespace={app_namespace + "/targets_connect"}
+          select_title={"Targets"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
+
+        {/* Fourth source row, same shape as the three above. No select_title
+            here: Nepi_IF_ConnectNavPose hardcodes its selector label to
+            "NavPose Source" and does not read select_title, so passing one
+            would be dead weight. Its default (non-shortened, no connect header)
+            layout is the same selector-plus-Connected-indicator pair the other
+            three rows render, which is why this row carries no BooleanIndicator
+            of its own. */}
+        <NepiIFConnectNavPose
+          namespace={app_namespace + "/navpose_connect"}
+          select_title={"NavPose"}
+          show_selector={true}
+          show_controls={false}
+          show_data={false}
+          make_section={false}
+        />
 
             </React.Fragment>
         )
