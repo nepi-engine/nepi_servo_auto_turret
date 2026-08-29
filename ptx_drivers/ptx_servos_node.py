@@ -101,8 +101,18 @@ class ServosPTXNode:
     position_times = [0.0,0.0]
 
     speed_ratio = 0.5
-    pan_speed_max_dps = 1
-    tilt_speed_max_dps = 1
+
+    # Placeholder reported only before either axis has ever connected. It is deliberately
+    # a poor speed rather than a plausible one: a wrong-but-believable max would scale
+    # every downstream dps value silently, where a visibly slow axis gets noticed.
+    UNKNOWN_SPEED_MAX_DPS = 1
+    # Bounds on an operator-supplied max. A standard hobby servo runs a few hundred dps
+    # (3001HB is roughly 315-400), so the range has to cover that, not stop below it.
+    MIN_SPEED_MAX_DPS = 1
+    MAX_SPEED_MAX_DPS = 1000
+
+    pan_speed_max_dps = UNKNOWN_SPEED_MAX_DPS
+    tilt_speed_max_dps = UNKNOWN_SPEED_MAX_DPS
 
     drv_dict = dict()    
 
@@ -302,9 +312,11 @@ class ServosPTXNode:
             self.pan_options = ['None'] + pan_options
             self.pan_connected = self.pan_connect_if.check_connection()
             if self.pan_connected == True:
-                self.pan_speed_max_dps = self.pan_connect_if.get_max_speed_dps()
-            else:
-                self.pan_speed_max_dps = 1
+                # Keep the last known max if the device reports nothing usable, and do not
+                # wipe it back to the placeholder on a disconnect -- see getPanSpeedMax.
+                pan_speed_max_dps = self.pan_connect_if.get_max_speed_dps()
+                if pan_speed_max_dps is not None and pan_speed_max_dps > 0:
+                    self.pan_speed_max_dps = pan_speed_max_dps
 
         if self.tilt_connect_if is not None:
             tilt_options = list(self.tilt_connect_if.get_available_topics())
@@ -314,9 +326,9 @@ class ServosPTXNode:
             self.tilt_options = ['None'] + tilt_options
             self.tilt_connected = self.tilt_connect_if.check_connection()
             if self.tilt_connected == True:
-                self.tilt_speed_max_dps = self.tilt_connect_if.get_max_speed_dps()
-            else:
-                self.tilt_speed_max_dps = 1
+                tilt_speed_max_dps = self.tilt_connect_if.get_max_speed_dps()
+                if tilt_speed_max_dps is not None and tilt_speed_max_dps > 0:
+                    self.tilt_speed_max_dps = tilt_speed_max_dps
 
         nepi_sdk.start_timer_process(1, self.updateConnectsHandler, oneshot = True)
 
@@ -495,33 +507,49 @@ class ServosPTXNode:
 
 
 
+    # These report the LAST KNOWN max while an axis is disconnected rather than the
+    # UNKNOWN_SPEED_MAX_DPS placeholder. PTXActuatorIF reads getSpeedMax() to fill
+    # speed_max_dps, and every dps value downstream is scaled by it, so handing back the
+    # placeholder during a reconnect blip silently rescales the whole speed axis.
     def getPanSpeedMax(self):
-        max_speed_dps = 1
         if self.pan_connect_if is not None and self.pan_connected == True:
-            max_speed_dps =  self.pan_connect_if.get_max_speed_dps()
-        return max_speed_dps
+            max_speed_dps = self.pan_connect_if.get_max_speed_dps()
+            if max_speed_dps is not None and max_speed_dps > 0:
+                self.pan_speed_max_dps = max_speed_dps
+        return self.pan_speed_max_dps
 
     def getTiltSpeedMax(self):
-        max_speed_dps = 1
         if self.tilt_connect_if is not None and self.tilt_connected == True:
-            max_speed_dps =  self.tilt_connect_if.get_max_speed_dps()
-        return max_speed_dps
+            max_speed_dps = self.tilt_connect_if.get_max_speed_dps()
+            if max_speed_dps is not None and max_speed_dps > 0:
+                self.tilt_speed_max_dps = max_speed_dps
+        return self.tilt_speed_max_dps
 
 
     def getSpeedMax(self):
-        max_speed_dps = 1
-        if self.pan_connect_if is not None and self.pan_connected == True:
-            max_speed_dps =  max(max_speed_dps, self.getPanSpeedMax())
-        if self.tilt_connect_if is not None and self.tilt_connected == True:
-            max_speed_dps =  max(max_speed_dps, self.getTiltSpeedMax())
+        max_speed_dps = self.UNKNOWN_SPEED_MAX_DPS
+        if self.pan_connect_if is not None:
+            max_speed_dps = max(max_speed_dps, self.getPanSpeedMax())
+        if self.tilt_connect_if is not None:
+            max_speed_dps = max(max_speed_dps, self.getTiltSpeedMax())
         return max_speed_dps
-    
+
     def setSpeedMax(self, speed):
-        if speed >= 10 and speed <= 40:
-            if self.pan_connect_if is not None and self.pan_connected == True:
-                self.pan_connect_if.set_max_speed_dps(speed)
-            if self.tilt_connect_if is not None and self.tilt_connected == True:
-                self.tilt_connect_if.set_max_speed_dps(speed)
+        # The old guard silently dropped anything outside 10-40 dps, which is well under
+        # what a standard hobby servo does (a 3001HB is roughly 315-400 dps), so a correct
+        # max could never be set and the axis was capped at a fraction of the hardware.
+        # Out-of-range values are now reported instead of vanishing.
+        if speed < self.MIN_SPEED_MAX_DPS or speed > self.MAX_SPEED_MAX_DPS:
+            self.msg_if.pub_warn("Max speed " + str(speed) + " dps outside supported range " +
+                                 str(self.MIN_SPEED_MAX_DPS) + "-" + str(self.MAX_SPEED_MAX_DPS) +
+                                 " dps... ignoring")
+            return
+        if self.pan_connect_if is not None and self.pan_connected == True:
+            self.pan_connect_if.set_max_speed_dps(speed)
+            self.pan_speed_max_dps = speed
+        if self.tilt_connect_if is not None and self.tilt_connected == True:
+            self.tilt_connect_if.set_max_speed_dps(speed)
+            self.tilt_speed_max_dps = speed
 
 
 

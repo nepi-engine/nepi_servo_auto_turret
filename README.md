@@ -24,12 +24,18 @@ so its files drop into the `nepi_engine_ws` submodules (`nepi_interfaces`, `nepi
 | Interfaces | `src/nepi_interfaces/msg/DeviceSVXStatus.msg` | Servo status message |
 | | `src/nepi_interfaces/srv/SVXCapabilitiesQuery.srv` | Capabilities service |
 | | `src/nepi_interfaces/msg/ServoLimits.msg` | Soft-limit control message (`min_deg`/`max_deg`) |
-| API | `src/nepi_api/device_if_svx.py` (`SVXActuatorIF`) | Device interface class (subscribes controls, publishes status, serves capabilities) |
-| | `src/nepi_api/connect_device_if_svx.py` (`ConnectSVXDeviceIF`) | Connect client for other nodes |
+| API | `nepi_engine_ws` → `nepi_api/src/nepi_api/device_if_svx.py` (`SVXActuatorIF`) | Device interface class (subscribes controls, publishes status, serves capabilities) |
+| | `nepi_engine_ws` → `nepi_api/src/nepi_api/connect_device_if_svx.py` (`ConnectSVXDeviceIF`) | Connect client for other nodes |
 | RUI | `src/nepi_rui/NepiDeviceSVX.js` | Device selector panel |
 | | `src/nepi_rui/NepiDeviceSVX-Controls.js` | Control panel (drawn per capability flags) |
 | | `src/nepi_rui/NepiDeviceSVX-ImageViewer.js` | Image viewer + position slider |
 | Driver | `src/nepi_drivers/svx_drivers/svx_servo_maestro_*` | Pololu Micro Maestro single-servo driver (USB serial) |
+
+The two API files now live in `nepi_engine_ws`, not here. Do not re-add copies under
+`src/nepi_api/` — `src/deploy_src.sh` rsyncs everything in that folder over the device's
+`/opt/nepi/nepi_engine/lib/python3/dist-packages/nepi_api/`, so a stale copy silently
+replaces the engine's own version and the drivers then fail against an out-of-date
+signature. Deploy those files with `nepi_api`'s own `deploy_api.sh` instead.
 
 ## Control topics (subscribed by `SVXActuatorIF`)
 
@@ -70,8 +76,8 @@ One SVX driver ships:
   two coexisting nodes.
 
 To add a future board, write a new driver against the shared `SVXActuatorIF`
-(`src/nepi_api/device_if_svx.py`) — the generic single-servo interface — wiring only the
-capability callbacks that board supports (leave the rest `None`).
+(`nepi_engine_ws` → `nepi_api/src/nepi_api/device_if_svx.py`) — the generic single-servo
+interface — wiring only the capability callbacks that board supports (leave the rest `None`).
 
 The Maestro driver is written against the documented protocol but has **not been
 hardware-validated** in this environment (no Maestro attached) — see the validation note in

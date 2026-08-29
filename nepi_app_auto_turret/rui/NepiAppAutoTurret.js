@@ -606,15 +606,14 @@ class NepiAppAutoTurret extends Component {
       const speedTiltRatio = pantilt_status_msg.speed_tilt_ratio
       const speedPanTiltRatio = pantilt_status_msg.speed_ratio
 
-      // pan_tilt_max_speed_dps is UNSET_VALUE (-999) until the app has a
-      // connected device to ask, which would render a negative dps readout;
-      // fall back to what the device reports for itself.
-      const maxSpeed = pantilt_status_msg.speed_max_dps
-      const panSetSpeed = speedPanRatio * maxSpeed
-      const tiltSetSpeed = speedTiltRatio * maxSpeed
-
-      const panSetSpeedClean = panSetSpeed + .001
-      const tiltSetSpeedClean = tiltSetSpeed + .001
+      // The speed sliders are percent sliders: adjustment is the 0.0-1.0 ratio and
+      // scaled={0.01} renders it as 0-100, which is what their 0-100 range and their
+      // "0%=min, 100%=max" tooltip describe. They previously passed a displayValue of
+      // ratio * speed_max_dps, so the handle sat at the percent while the box read a
+      // dps figure with no unit on it -- a full-speed pan showed "19.8". Deriving the
+      // readout from speed_max_dps also made it move whenever the max was recalibrated,
+      // for a control that never commanded dps in the first place. Current speed in real
+      // units is still reported, as the Average Speed row above.
 
 
         // Editable values for the (commented out) GoTo inputs. They live in state
@@ -762,8 +761,7 @@ class NepiAppAutoTurret extends Component {
                   min={0}
                   max={100}
                   tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                  displayValue={round(panSetSpeedClean,1)}
-                  unit={""}
+                  unit={"%"}
                 />
                 <SliderAdjustment
                   disabled={tilt_control_manaul_enabled === false}
@@ -775,8 +773,7 @@ class NepiAppAutoTurret extends Component {
                   min={0}
                   max={100}
                   tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                  displayValue={round(tiltSetSpeedClean,1)}
-                  unit={""}
+                  unit={"%"}
                 />
               </React.Fragment>
   
@@ -802,8 +799,7 @@ class NepiAppAutoTurret extends Component {
                   min={0}
                   max={100}
                   tooltip={"Speed as a percentage (0%=min, 100%=max)"}
-                  displayValue={round(panSetSpeedClean,1)}
-                  unit={""}
+                  unit={"%"}
                 />
              
               </React.Fragment>

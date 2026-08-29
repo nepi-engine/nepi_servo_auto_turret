@@ -1511,8 +1511,17 @@ class NepiAutoTurretApp(object):
     # Update Auto Process Data
     pantilt_connect_if = self.pantilt_connect_if
 
+    pantilt_status_dict = None
     if pantilt_connect_if is not None:
       pantilt_status_dict = pantilt_connect_if.get_status_dict()
+
+    # The connect IF exists as soon as a topic is selected, but get_status_dict() returns
+    # None until the first status actually arrives -- so a non-None IF is not enough to
+    # subscript. This timer fires on its own schedule and will normally beat the first
+    # status on any cold start, and stays None for as long as the pan/tilt node is down.
+    # The error terms are initialized to 0 above, so skipping a cycle simply leaves the
+    # last known values in the status message rather than reporting a fabricated one.
+    if pantilt_status_dict is not None:
       [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
      
       pan_goal_deg = pantilt_status_dict['pan_goal_deg']
