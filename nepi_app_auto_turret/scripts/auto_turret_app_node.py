@@ -25,9 +25,7 @@ from nepi_interfaces.msg import DevicePTXStatus
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import NavPoseStatus
 from nepi_interfaces.msg import TargetingStatus
-from nepi_interfaces.msg import Track
 
-from nepi_interfaces.msg import Datum, DataStatus, Control, ControlsStatus
 
 from nepi_interfaces.msg import FloatArray, StringArray
 
@@ -35,11 +33,9 @@ from nepi_app_auto_turret.msg import AutoTurretStatus
 
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
-from nepi_sdk import nepi_targets
-from nepi_sdk import nepi_targets_track
 from nepi_sdk import nepi_controls
 from nepi_sdk import nepi_data
-
+from nepi_sdk import nepi_process_track
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
@@ -139,28 +135,27 @@ class NepiAutoTurretApp(object):
   auto_process_namespace = ''
   auto_process_if = None
   auto_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  auto_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
+  auto_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   scanning_enabled = False
   scan_process_name = 'process_scan'
   scan_process_namespace = ''
   scan_process_if = None
   scan_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  scan_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
+  scan_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
-  tracking_enabled = False
+
   track_process_name = 'process_track'
-  track_process_namespace = ''
+  track_process_class_instance = nepi_process_track
   track_process_if = None
-  track_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  track_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
+  tracking_enabled = False
 
   stabilize_enabled = False
   stab_process_name = 'process_stab'
   stab_process_namespace = ''
   stab_process_if = None
   stab_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  stab_process_data = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
+  stab_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   # Overlay controls, consumed by the image publisher node off the status msg
   show_full_screen = False
@@ -200,11 +195,8 @@ class NepiAutoTurretApp(object):
 
 
     self.auto_process_namespace = self.node_namespace + '/' + self.auto_process_name
-
     self.scan_process_namespace = self.node_namespace + '/' + self.scan_process_name
-
     self.track_process_namespace = self.node_namespace + '/' + self.track_process_name
-    
     self.stab_process_namespace = self.node_namespace + '/' + self.stab_process_name
 
 
@@ -608,44 +600,40 @@ class NepiAutoTurretApp(object):
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
 
-    ##############################
-    self.auto_process_if = ProcessIF(process_name = self.auto_process_name,
-                process_group = self.node_name,
-                process_description = self.auto_process_name,
-                process_data_dict = self.auto_process_data,
-                process_controls_dict = self.auto_process_controls,
-                results_msg = None,
-                show_controls = True,
-                show_data = True,
-                log_name = None,
-                log_name_list = [],
-                msg_if = self.msg_if,
-                node_if = self.node_if
-    )  
+    # ##############################
+    # self.auto_process_if = ProcessIF(process_name = self.auto_process_name,
+    #             process_group = self.node_name,
+    #             process_description = self.auto_process_name,
+    #             process_controls_dict = self.auto_process_controls,
+    #             results_dict = self.auto_data,
+    #             results_msg = None,
+    #             show_controls = True,
+    #             show_data = True,
+    #             log_name = None,
+    #             log_name_list = [],
+    #             msg_if = self.msg_if,
+    #             node_if = self.node_if
+    # )  
 
-    self.scan_process_if = ProcessIF(process_name = self.scan_process_name,
-                process_group = self.node_name,
-                process_description = self.scan_process_name,
-                process_data_dict = self.scan_process_data,
-                process_controls_dict = self.scan_process_controls,
-                results_msg = None,
-                show_controls = True,
-                show_data = True,
-                log_name = None,
-                log_name_list = [],
-                msg_if = self.msg_if,
-                node_if = self.node_if
-    )  
+    # self.scan_process_if = ProcessIF(process_name = self.scan_process_name,
+    #             process_group = self.node_name,
+    #             process_description = self.scan_process_name,
+    #             process_controls_dict = self.scan_process_controls,
+    #             results_dict = self.scan_data,
+    #             results_msg = None,
+    #             show_controls = True,
+    #             show_data = True,
+    #             log_name = None,
+    #             log_name_list = [],
+    #             msg_if = self.msg_if,
+    #             node_if = self.node_if
+    # )  
 
     self.track_process_if = ProcessIF(process_name = self.track_process_name,
                 process_group = self.node_name,
                 process_description = self.track_process_name,
-                process_data_dict = self.track_process_data,
-                process_controls_dict = self.track_process_controls,
-                results_msg = Track,
-                results_name = 'track',
+                process_class_instance = self.track_process_class_instance,
                 show_controls = True,
-                show_data = True,
                 show_results = True,
                 log_name = None,
                 log_name_list = [],
@@ -653,19 +641,19 @@ class NepiAutoTurretApp(object):
                 node_if = self.node_if
     )  
 
-    self.stab_process_if = ProcessIF(process_name = self.stab_process_name,
-                process_group = self.node_name,
-                process_description = self.stab_process_name,
-                process_data_dict = self.stab_process_data,
-                process_controls_dict = self.stab_process_controls,
-                results_msg = None,
-                show_controls = True,
-                show_data = True,
-                log_name = None,
-                log_name_list = [],
-                msg_if = self.msg_if,
-                node_if = self.node_if
-    )  
+    # self.stab_process_if = ProcessIF(process_name = self.stab_process_name,
+    #             process_group = self.node_name,
+    #             process_description = self.stab_process_name,
+    #             process_controls_dict = self.stab_process_controls,
+    #             results_dict = self.stab_results,
+    #             results_msg = None,
+    #             show_controls = True,
+    #             show_data = True,
+    #             log_name = None,
+    #             log_name_list = [],
+    #             msg_if = self.msg_if,
+    #             node_if = self.node_if
+    # )  
 
 
     ##############################
@@ -1117,6 +1105,8 @@ class NepiAutoTurretApp(object):
         self.track_process_if.init()
       if self.stab_process_if is not None:
         self.stab_process_if.init()
+      if self.track_process_if is not None:
+        self.track_process_if.init()
 
     if do_updates == True:
       pass
@@ -1124,6 +1114,17 @@ class NepiAutoTurretApp(object):
 
   def resetCb(self, do_updates = True):
     self.msg_if.pub_warn("Reseting")
+    if self.auto_process_if is not None:
+      self.auto_process_if.reset()
+    if self.scan_process_if is not None:
+      self.scan_process_if.reset()
+    if self.track_process_if is not None:
+      self.track_process_if.reset()
+    if self.stab_process_if is not None:
+      self.stab_process_if.reset()
+    if self.track_process_if is not None:
+      self.track_process_if.reset()
+
     if self.node_if is not None:
       pass
     if do_updates == True:
@@ -1132,6 +1133,16 @@ class NepiAutoTurretApp(object):
 
   def factoryResetCb(self, do_updates = True):
     self.msg_if.pub_warn("Factory Reseting")
+    if self.auto_process_if is not None:
+      self.auto_process_if.factory_reset()
+    if self.scan_process_if is not None:
+      self.scan_process_if.factory_reset()
+    if self.track_process_if is not None:
+      self.track_process_if.factory_reset()
+    if self.stab_process_if is not None:
+      self.stab_process_if.factory_reset()
+    if self.track_process_if is not None:
+      self.track_process_if.factory_reset()
     if self.node_if is not None:
       pass
     if do_updates == True:
@@ -1159,19 +1170,21 @@ class NepiAutoTurretApp(object):
 
     #####################
     # Update Auto Process Data
-    auto_process_data = dict()
-    auto_process_data['pan_control_manaul_enabled'] = True
-    auto_process_data['pan_auto_manaul_enabled'] = False
-    auto_process_data['tilt_control_manaul_enabled'] = True
-    auto_process_data['tilt_auto_manaul_enabled'] = False
+    auto_data = dict()
+    auto_data['pan_control_manaul_enabled'] = True
+    auto_data['pan_auto_manaul_enabled'] = False
+    auto_data['tilt_control_manaul_enabled'] = True
+    auto_data['tilt_auto_manaul_enabled'] = False
 
-    auto_process_data['auto_pan_goal_ratio'] = 0
-    auto_process_data['auto_pan_goal_deg'] = 0
-    auto_process_data['auto_pan_error_deg'] = 0
 
-    auto_process_data['auto_tilt_goal_ratio'] = 0
-    auto_process_data['auto_tilt_goal_deg'] = 0
-    auto_process_data['auto_tilt_error_deg'] = 0
+    auto_results = dict()
+    auto_results['auto_pan_goal_ratio'] = 0
+    auto_results['auto_pan_goal_deg'] = 0
+    auto_results['auto_pan_error_deg'] = 0
+
+    auto_results['auto_tilt_goal_ratio'] = 0
+    auto_results['auto_tilt_goal_deg'] = 0
+    auto_results['auto_tilt_error_deg'] = 0
 
 
 
@@ -1181,23 +1194,22 @@ class NepiAutoTurretApp(object):
     #####################
     # Run Process
     #####################
-    pan_manual = auto_process_data['pan_control_manaul_enabled']
-    pan_auto = auto_process_data['pan_auto_manaul_enabled']
-    tilt_manual = auto_process_data['tilt_control_manaul_enabled']
-    tilt_auto = auto_process_data['tilt_auto_manaul_enabled']
+    pan_manual = auto_data['pan_control_manaul_enabled']
+    pan_auto = auto_data['pan_auto_manaul_enabled']
+    tilt_manual = auto_data['tilt_control_manaul_enabled']
+    tilt_auto = auto_data['tilt_auto_manaul_enabled']
 
 
     #####################
     # Run Track Process
-    track_dict = None
-    try:
-      if len(targets_dict_list) > 0 or self.track_process_if is not None:
-        [track_dict, tracking_dict] = nepi_targets_track.get_best_from_targets(
-                                            targets_dict_list,
-                                            tracking_dict = nepi_targets_track.BLANK_SETTINGS_DICT)
-    except Exception as e:
-      self.msg_if.pub_warn("Failed to process auto targets_dict_list: " + str(e), throttle_s = 5)
-      pass
+    track_process_results = None
+    
+    if self.track_process_if is not None:
+
+      self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)
+
+      track_process_results = self.track_process_if.process_results()
+
 
 
     
@@ -1237,18 +1249,14 @@ class NepiAutoTurretApp(object):
         else:
           auto_pan_error_deg = 0
 
-        # auto_process_data['auto_pan_goal_ratio'] = pantilt_connect_if
-        # auto_process_data['auto_pan_goal_deg'] =
-        auto_process_data['auto_pan_error_deg'] = auto_pan_error_deg
+        auto_results['auto_pan_error_deg'] = auto_pan_error_deg
 
         if tilt_manual == True:
           auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
         else:
           auto_tilt_error_deg = 0
 
-        # auto_process_data['auto_tilt_goal_ratio'] =
-        # auto_process_data['auto_tilt_goal_deg'] =
-        auto_process_data['auto_tilt_error_deg'] = auto_tilt_error_deg
+        auto_results['auto_tilt_error_deg'] = auto_tilt_error_deg
       except Exception as e:
         self.msg_if.pub_warn("Failed to process auto pt errors: " + str(e), throttle_s = 5)
         pass
@@ -1262,8 +1270,8 @@ class NepiAutoTurretApp(object):
     # Update Auto Pan Status Values
 
     try:
-      auto_pan_error_deg = round(auto_process_data['auto_pan_error_deg'], 2)
-      auto_tilt_error_deg = round(auto_process_data['auto_tilt_error_deg'], 2)
+      auto_pan_error_deg = round(auto_results['auto_pan_error_deg'], 2)
+      auto_tilt_error_deg = round(auto_results['auto_tilt_error_deg'], 2)
 
       self.status_msg.auto_pan_error_deg = auto_pan_error_deg
       self.status_msg.auto_tilt_error_deg = auto_tilt_error_deg
@@ -1273,26 +1281,6 @@ class NepiAutoTurretApp(object):
 
 
 
-
-    #####################
-    # Publish Track results
-
-    track_msg = Track()
-    if track_dict is not None and self.image_connect_if is not None and self.track_process_if is not None:
-        try:
-            
-            track_msg.timestamp = nepi_utils.get_time()
-            track_msg.process_name = self.node_name
-            track_msg.process_namespace = self.node_namespace
-            track_msg.source_topic = self.image_connect_if.get_namespace()
-            track_msg.source_timestamp = nepi_utils.get_time()
-            target_msg = nepi_sdk.convert_dict2msg(TARGET_MSG_TYPE, track_dict)
-            track_msg.target = target_msg
-            #self.msg_if.pub_warn("Publishing track mgs: " + str(track_msg), throttle_s = 5)
-            self.track_process_if.publish_results(track_msg)
-        except Exception as e:
-          self.msg_if.pub_warn("Failed to process track_dict: " + str(e), throttle_s = 5)
-          pass
 
 
 
@@ -1307,7 +1295,7 @@ class NepiAutoTurretApp(object):
     # Re-arm this loop, not updaterCb. Re-arming the updater here ran the
     # process body exactly once and then drove the 1 Hz updater at the process
     # rate instead.
-    #self.msg_if.pub_warn("Auto Pan Error: Track Pan Error: Next Time: Track Dict " + str([auto_process_data['auto_tilt_error_deg'], track_msg.azimuth_deg, next_process_delay, track_dict]), throttle_s = 5)
+    #self.msg_if.pub_warn("Auto Pan Error: Track Pan Error: Next Time: Track Dict " + str([auto_data['auto_tilt_error_deg'], track_msg.azimuth_deg, next_process_delay, track_dict]), throttle_s = 5)
     nepi_sdk.start_timer_process(next_process_delay, self.processCb, oneshot = True)
 
 

@@ -1039,7 +1039,8 @@ class NepiAppAutoTurret extends Component {
        
           <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
 
-
+    
+          <Label title={"Process Settings"}></Label>
 
         <SliderAdjustment
           title={"Max Process Rate"}
@@ -1069,8 +1070,6 @@ class NepiAppAutoTurret extends Component {
         />
 
 
-
-          <Label title={"Settings"}></Label>
 
                   <div style={{ display: 'flex' }} >
                     <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
@@ -1168,6 +1167,9 @@ class NepiAppAutoTurret extends Component {
 
 
 
+          <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+
+        <Label title={"Process Connections"}></Label>
 
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}

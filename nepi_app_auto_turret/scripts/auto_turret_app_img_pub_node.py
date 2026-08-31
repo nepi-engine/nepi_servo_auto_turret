@@ -32,7 +32,8 @@ from nepi_sdk import nepi_img
 from sensor_msgs.msg import Image
 
 from nepi_interfaces.msg import ImageStatus
-from nepi_interfaces.msg import Targets,Track
+from nepi_interfaces.msg import Targets
+from nepi_interfaces.msg import ProcessResultsTrack
 
 from nepi_app_auto_turret.msg import AutoTurretStatus
 
@@ -183,11 +184,11 @@ class AutoTurretImgPub:
                 'callback_args': ()
             },
             'auto_turret_track_sub': {
-                'msg': Track,
+                'msg': ProcessResultsTrack,
                 'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
-                'callback': self.trackCb,
+                'callback': self.processResultsCb,
                 'callback_args': ()
             },
 
@@ -775,7 +776,7 @@ class AutoTurretImgPub:
         self.targets_dict_list = targets_dict_list
         self.last_targets_time = nepi_utils.get_time()
 
-    def trackCb(self, msg):
+    def processResultsCb(self, msg):
         self.track_dict = nepi_sdk.convert_msg2dict(msg.target)
         self.last_track_time = nepi_utils.get_time()
 
