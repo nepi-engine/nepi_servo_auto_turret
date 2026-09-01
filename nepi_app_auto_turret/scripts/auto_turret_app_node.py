@@ -25,11 +25,12 @@ from nepi_interfaces.msg import DevicePTXStatus
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import NavPoseStatus
 from nepi_interfaces.msg import TargetingStatus
-
+from nepi_interfaces.msg import NavPose
 
 from nepi_interfaces.msg import FloatArray, StringArray
 
 from nepi_app_auto_turret.msg import AutoTurretStatus
+
 
 from nepi_sdk import nepi_sdk
 from nepi_sdk import nepi_utils
@@ -171,6 +172,7 @@ class NepiAutoTurretApp(object):
 
   last_targets_time = 0
   targets_dict_list = None
+  targets_classes = []
   targets_lock = threading.Lock()
 
   def __init__(self):
@@ -568,6 +570,7 @@ class NepiAutoTurretApp(object):
 
     self.targets_connect_if = ConnectTargetsIF(
                                     auto_select_enabled = self.auto_select_enabled,
+                                    statusCb = self.targetsStatusCb,
                                     dataCB = self.targetsCb,
                                     show_selector = True,
                                     show_controls = False,
@@ -633,6 +636,7 @@ class NepiAutoTurretApp(object):
                 process_group = self.node_name,
                 process_description = self.track_process_name,
                 process_class_instance = self.track_process_class_instance,
+                show_process = True,
                 show_controls = True,
                 show_results = True,
                 log_name = None,
@@ -771,15 +775,21 @@ class NepiAutoTurretApp(object):
     self.tilt_goto = UNSET_VALUE
 
   def targetsCb(self, targets_dict):
-    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict), throttle_s = 5)
+    #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict), throttle_s = 10)
     self.last_targets_time = nepi_utils.get_time()
     self.targets_lock.acquire()
-    self.targets_dict_list = targets_dict['data']['targets']
+    try:
+      self.targets_dict_list = targets_dict['data']['targets']
+    except Exception as e:
+      self.msg_if.pub_warn("Failed to convert Targets Dict : " + str(targets_dict) + " : " + str(e), throttle_s = 10)
+    
     self.targets_lock.release()
     #self.msg_if.pub_warn("Added target list for name " + str(target_dict['target_name']))
         
-   
-
+  def targetsStatusCb(self, status_dict):
+    #self.msg_if.pub_info("Targets Status callback got new status mgs: " + str(status_dict), throttle_s = 10)
+    self.targets_classes = status_dict['available_classes']
+    
 
 
   def setAutoSelectEnableCb(self, msg):
@@ -1155,15 +1165,23 @@ class NepiAutoTurretApp(object):
   ## Auto Process Udpater
 
   def processCb(self, timer):
-    #self.msg_if.pub_warn("##############################################################")
-    #self.msg_if.pub_warn("Starting Process Thread")
-    #self.msg_if.pub_warn("###############################################################")
+    #self.msg_if.pub_warn("Starting Process Thread", throttle_s = 10)
     start_time = nepi_utils.get_time()
     #####################
     # Setup Process Inputs
     #####################
+    source_image_topic = None
+    if self.image_connect_if is not None:
+          source_image_topic = self.image_connect_if.get_namespace()
+
+    navpose_dict = nepi_sdk.convert_msg2dict(NavPose())
+    if self.navpose_connect_if is not None:
+          navpose_dict = self.navpose_connect_if.get_navpose_dict()
+
+
     self.targets_lock.acquire()
     targets_dict_list = copy.deepcopy(self.targets_dict_list)
+    targets_classes = copy.deepcopy(self.targets_classes)
     self.targets_lock.release()
     track_dict = None 
 
@@ -1206,9 +1224,18 @@ class NepiAutoTurretApp(object):
     
     if self.track_process_if is not None:
 
+      ### Update Data Dict
       self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)
+      self.track_process_if.set_data_value('navpose_dict', navpose_dict)
 
-      track_process_results = self.track_process_if.process_results()
+      ### Update Controls Dict
+      self.track_process_if.set_control_options('class_filters', targets_classes)
+      class_filters = self.track_process_if.get_control_value('class_filters')
+      if class_filters == []:
+        self.track_process_if.set_control_value('class_filters',targets_classes)
+
+      ### Process Results
+      track_process_results = self.track_process_if.process_results(source_topic = source_image_topic)
 
 
 
@@ -1284,6 +1311,7 @@ class NepiAutoTurretApp(object):
 
 
 
+    
     #############################
     # Publish Status and Set Next Process
     self.publish_status()

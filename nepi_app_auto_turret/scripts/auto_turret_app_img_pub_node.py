@@ -43,8 +43,8 @@ from nepi_api.system_if import SaveDataIF
 from nepi_api.data_if import ColorImageIF
 
 
-WATCHDOG_DELAY = 60
-WATCHDOG_TIMEOUT = 3
+WATCHDOG_DELAY = 20
+WATCHDOG_TIMEOUT = 2
 WATCHDOG_IMAGE_TIMEOUT = 1
 WATCHDOG_TARGETS_TIMEOUT = 1
 WATCHDOG_TRACK_TIMEOUT = 1
@@ -188,7 +188,7 @@ class AutoTurretImgPub:
                 'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
-                'callback': self.processResultsCb,
+                'callback': self.trackCb,
                 'callback_args': ()
             },
 
@@ -776,8 +776,8 @@ class AutoTurretImgPub:
         self.targets_dict_list = targets_dict_list
         self.last_targets_time = nepi_utils.get_time()
 
-    def processResultsCb(self, msg):
-        self.track_dict = nepi_sdk.convert_msg2dict(msg.target)
+    def trackCb(self, msg):
+        self.track_dict = nepi_sdk.convert_msg2dict(msg)
         self.last_track_time = nepi_utils.get_time()
 
     def statusCb(self, msg):

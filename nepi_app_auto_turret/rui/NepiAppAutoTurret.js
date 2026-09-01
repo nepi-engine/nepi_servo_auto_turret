@@ -248,7 +248,7 @@ class NepiAppAutoTurret extends Component {
     const app_namespace = this.getAppNamespace()
 
 
-    const auto_select_active = status_msg.auto_select_enabled
+
     const pantilt_connected = status_msg.pantilt_connected
     
 
@@ -267,26 +267,8 @@ class NepiAppAutoTurret extends Component {
       <Columns>
       <Column>
 
-
-        <Columns>
-        <Column>
-
-        </Column>
-        <Column>
-            <Label title="Auto Select Enable">
-              <AsyncToggle
-                checked={auto_select_active === true}
-                onClick={() => sendBoolMsg(app_namespace + "/set_auto_select_enable", !auto_select_active)}>
-              </AsyncToggle>
-            </Label>
-
-        </Column>
-        </Columns>
-
-
         <div hidden={pantilt_connected === false}>
 
-          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
           <Columns>
           <Column>
@@ -1009,7 +991,7 @@ class NepiAppAutoTurret extends Component {
 
 
   rendeAutoControls() {
-   
+    const { sendBoolMsg } = this.props.ros
     const app_namespace = this.getAppNamespace()
 
     const status_msg = this.state.status_msg
@@ -1031,7 +1013,7 @@ class NepiAppAutoTurret extends Component {
  
         const max_process_rate_hz = status_msg.max_process_rate_hz
         const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
-
+        const auto_select_active = status_msg.auto_select_enabled
         const show_control = this.state.show_control
         return (
           <React.Fragment>
@@ -1128,12 +1110,23 @@ class NepiAppAutoTurret extends Component {
 
               </div>
 
+      { ( show_control !== 'None' ) ?
+      <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+
+        : null}
+
+
+      { ( show_control !== 'None' ) ?
+           <Label title={show_control.toUpperCase() + ' Process'}></Label>
+        : null}
+ 
 
       { ( show_control === 'scan' ) ?
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
         namespace={ status_msg.scan_process_namespace}
+        allways_show_controls={true}
         />
         : null}
 
@@ -1143,6 +1136,7 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.track_process_namespace}
+        allways_show_controls={true}
         />
         : null}
 
@@ -1151,6 +1145,7 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.stab_process_namespace}
+        allways_show_controls={true}
         />
         : null}
 
@@ -1162,14 +1157,35 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.auto_process_namespace}
+        allways_show_controls={true}
         />
         : null}
 
 
 
-          <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
         <Label title={"Process Connections"}></Label>
+
+
+
+    
+
+          <Columns>
+          <Column>
+
+          </Column>
+          <Column>
+              <Label title="Auto Select Enable">
+                <AsyncToggle
+                  checked={auto_select_active === true}
+                  onClick={() => sendBoolMsg(app_namespace + "/set_auto_select_enable", !auto_select_active)}>
+                </AsyncToggle>
+              </Label>
+
+          </Column>
+          </Columns>
+
 
         <NepiIFConnectPTX
           namespace={app_namespace + "/ptx_connect"}
