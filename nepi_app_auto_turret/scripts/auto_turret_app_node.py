@@ -129,7 +129,9 @@ class NepiAutoTurretApp(object):
 
   # Process controls
   auto_select_enabled = True
+  min_max_process_rates = [0.1,100]
   max_process_rate_hz = 10.0
+  min_max_image_pub_rates = [1,20]
   max_image_pub_rate_hz = 10.0
 
   auto_process_name = 'process_auto'
@@ -172,7 +174,8 @@ class NepiAutoTurretApp(object):
 
   last_targets_time = 0
   targets_dict_list = None
-  targets_classes = []
+  targets_classes = None
+  track_classes = None
   targets_lock = threading.Lock()
 
   def __init__(self):
@@ -791,7 +794,6 @@ class NepiAutoTurretApp(object):
     self.targets_classes = status_dict['available_classes']
     
 
-
   def setAutoSelectEnableCb(self, msg):
     enabled = msg.data
     self.msg_if.pub_info("Setting auto source select to: " + str(enabled))
@@ -803,9 +805,11 @@ class NepiAutoTurretApp(object):
     # Stored and reported only. This node runs no per-frame process loop, so
     # nothing consumes the value yet.
     rate = msg.data
-    if rate < 0.1:
-      self.msg_if.pub_warn("Ignoring out of range max process rate: " + str(rate))
-      return
+    if rate < self.min_max_process_rates[0]:
+      rate = self.min_max_process_rates[0]
+    if rate > self.min_max_process_rates[1]:
+      rate = self.min_max_process_rates[1]
+
     self.msg_if.pub_info("Setting max process rate to: " + str(rate))
     self.max_process_rate_hz = rate
     self.setParam('max_process_rate_hz', rate)
@@ -813,9 +817,10 @@ class NepiAutoTurretApp(object):
 
   def setMaxImagePubRateCb(self, msg):
     rate = msg.data
-    if rate < 0.1:
-      self.msg_if.pub_warn("Ignoring out of range max image pub rate: " + str(rate))
-      return
+    if rate < self.min_max_image_pub_rates[0]:
+      rate = self.min_max_image_pub_rates[0]
+    if rate > self.min_max_image_pub_rates[1]:
+      rate = self.min_max_image_pub_rates[1]
     self.msg_if.pub_info("Setting max image pub rate to: " + str(rate))
     self.max_image_pub_rate_hz = rate
     self.setParam('max_image_pub_rate_hz', rate)
@@ -1228,12 +1233,18 @@ class NepiAutoTurretApp(object):
       self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)
       self.track_process_if.set_data_value('navpose_dict', navpose_dict)
 
-      ### Update Controls Dict
-      self.track_process_if.set_control_options('class_filters', targets_classes)
-      class_filters = self.track_process_if.get_control_value('class_filters')
-      if class_filters == []:
-        self.track_process_if.set_control_value('class_filters',targets_classes)
 
+      ### Update Process Dictionaries
+
+      track_classes = self.track_classes
+      if targets_classes is not None:
+        self.track_process_if.set_control_options('class_filters', targets_classes)
+        class_filters = self.track_process_if.get_control_value('class_filters')
+        if class_filters == [] and track_classes is None:
+          self.track_process_if.set_control_value('class_filters',targets_classes)
+        if track_classes is None:
+          self.track_classes = self.track_process_if.get_control_value('class_filters')
+          
       ### Process Results
       track_process_results = self.track_process_if.process_results(source_topic = source_image_topic)
 

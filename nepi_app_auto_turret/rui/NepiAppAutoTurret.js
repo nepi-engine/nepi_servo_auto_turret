@@ -1024,32 +1024,7 @@ class NepiAppAutoTurret extends Component {
     
           <Label title={"Process Settings"}></Label>
 
-        <SliderAdjustment
-          title={"Max Process Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_process_rate_hz}
-          topic={app_namespace + "/set_max_process_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets process max rate in hz"}
-          unit={"Hz"}
-        />
-
-
-        <SliderAdjustment
-          title={"Max Image Publish Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_image_pub_rate_hz}
-          topic={app_namespace + "/set_max_image_pub_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets overlay image max publish rate in hz"}
-          unit={"Hz"}
-        />
+   
 
 
 
@@ -1152,7 +1127,39 @@ class NepiAppAutoTurret extends Component {
 
 
 
+
+    { ( show_control === 'auto' ) ?
+     <SliderAdjustment
+          title={"Max Process Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_process_rate_hz}
+          topic={app_namespace + "/set_max_process_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets process max rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+{/*         
+    { ( show_control === 'auto' ) ?
+        <SliderAdjustment
+          title={"Max Image Publish Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_image_pub_rate_hz}
+          topic={app_namespace + "/set_max_image_pub_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets overlay image max publish rate in hz"}
+          unit={"Hz"}
+        />
+        : null} */}
+
       { ( show_control === 'auto' ) ?
+
       <Nepi_IF_ConnectProcess
         make_section={false}
         title={null}
