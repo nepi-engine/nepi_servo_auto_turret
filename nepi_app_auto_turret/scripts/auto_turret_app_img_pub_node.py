@@ -49,14 +49,6 @@ WATCHDOG_IMAGE_TIMEOUT = 1
 WATCHDOG_TARGETS_TIMEOUT = 1
 WATCHDOG_TRACK_TIMEOUT = 1
 
-OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
-OVERLAY_TARGETS_COLOR = (255, 255, 255)
-OVERLAY_TRACK_COLOR = (255, 0, 0)
-
-# Label font, hoisted out of the draw loop. Nothing about it varies per frame.
-OVERLAY_FONT = cv2.FONT_HERSHEY_DUPLEX
-OVERLAY_FONT_COLOR = (255, 255, 255)
-OVERLAY_LINE_TYPE = cv2.LINE_AA
 
 class AutoTurretImgPub:
 
@@ -82,14 +74,14 @@ class AutoTurretImgPub:
     img_info_dict = None
     img_info_lock = threading.Lock()
 
-    targets_dict_list = []
+    targets_results_msg = []
     targets_lock = threading.Lock()
-    last_targets_time = 0
+    targets_time = 0
     show_targets_enabled = False
 
-    track_dict = None
+    track_results = None
     track_lock = threading.Lock()
-    last_track_time = 0
+    track_results_time = 0
     show_track_enabled = False
 
     goal_error_degs = [0,0]
@@ -112,12 +104,10 @@ class AutoTurretImgPub:
 
     has_color_image = False
 
-    
+    draw_targets = False
     draw_track = False
     draw_crosshair = False
 
-    overlay_labels = True
-    overlay_range_bearing = True
 
     DEFAULT_NODE_NAME = "auto_turret_img_pub"  # Can be overwritten by launch command
 
@@ -188,7 +178,7 @@ class AutoTurretImgPub:
                 'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
-                'callback': self.trackCb,
+                'callback': self.trackResultsCb,
                 'callback_args': ()
             },
 
@@ -288,58 +278,6 @@ class AutoTurretImgPub:
         return img_info_dict
 
 
-    ###############.########################
-    # Per-cycle result snapshots
-
-
-    def getSourceResult(self, source_topic):
-        # One reference, one read, no copy. Entries are immutable once stored, so
-        # the maps do not have to be copied out of the way of the next cycle's
-        # writer the way they did when the render read them field by field.
-        result_dict = self.targets_dict_list.get(source_topic, None)
-        if result_dict is None:
-            return self.createResultDict()
-        return result_dict
-
-    def setSourceResult(self, source_topic, result_dict):
-        self.targets_lock.acquire()
-        self.targets_dict_list[source_topic] = result_dict
-        self.targets_lock.release()
-
-    def clearSourceResult(self, source_topic):
-        self.targets_lock.acquire()
-        if source_topic in self.targets_dict_list.keys():
-            self.targets_dict_list[source_topic] = self.createResultDict()
-        self.targets_lock.release()
-
-    ###############.########################
-    # Render handoff
-
-    def setRenderSlot(self, source_topic, timestamp, img_msg):
-        self.render_slot_lock.acquire()
-        self.render_slot_dict[source_topic] = (timestamp, img_msg)
-        self.render_slot_lock.release()
-
-    def getRenderSlotTopics(self):
-        self.render_slot_lock.acquire()
-        source_topics = list(self.render_slot_dict.keys())
-        self.render_slot_lock.release()
-        return source_topics
-
-    def popRenderSlot(self, source_topic):
-        # Taking the frame out is what makes this a slot and not a queue: if the
-        # render is slower than the source, the frames that arrive in between
-        # overwrite each other and only the newest is ever drawn.
-        self.render_slot_lock.acquire()
-        slot = self.render_slot_dict.pop(source_topic, None)
-        self.render_slot_lock.release()
-        return slot
-
-    def clearRenderSlot(self, source_topic):
-        self.render_slot_lock.acquire()
-        if source_topic in self.render_slot_dict.keys():
-            del self.render_slot_dict[source_topic]
-        self.render_slot_lock.release()
 
     def updaterCb(self, timer):
         source_topic = copy.deepcopy(self.selected_image_topic)
@@ -385,14 +323,14 @@ class AutoTurretImgPub:
                 return
 
         cur_time = nepi_utils.get_time()
-        elapsed = cur_time - self.last_targets_time
+        elapsed = cur_time - self.targets_time
         if elapsed > WATCHDOG_TARGETS_TIMEOUT:
-            self.targets_dict_list = None
+            self.targets_results_dict = None
 
         cur_time = nepi_utils.get_time()
-        elapsed = cur_time - self.last_track_time
+        elapsed = cur_time - self.track_results_time
         if elapsed > WATCHDOG_TRACK_TIMEOUT:
-            self.track_dict = None
+            self.track_results = None
 
         nepi_sdk.start_timer_process(1, self.watchdogCb, oneshot = True)
 
@@ -405,7 +343,7 @@ class AutoTurretImgPub:
             self.img_node_dict = dict()
             self.img_node_dict['img_sub'] = nepi_sdk.create_subscriber(source_topic, Image, self.imageCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
             self.img_node_dict['img_status_sub'] = nepi_sdk.create_subscriber(source_topic + '/status', ImageStatus, self.imageStatusCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
-            self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
+            self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsResultsCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
             self.img_node_lock.release()
 
         if self.img_info_dict is None:
@@ -446,14 +384,16 @@ class AutoTurretImgPub:
 
         return True
 
-    def needsImgCheck(self):
-        # if_key None asks about every published product for this source; a key
-        # asks about that one. The IF's needs_data is a level flag its own timer
-        # refreshes from subscriber and save state, so polling it is free.
+    def needsImgCheck(self, source_topic):
         needs_img = False
-        if self.img_if is not None:
-            if self.img_if.needs_data_check() == True:
-                needs_img = True
+        if self.imaging_enabled == False or \
+                self.img_if.ready == False or \
+                source_topic != self.selected_image_topic or \
+                self.img_info_dict is None or \
+                nepi_sdk.is_shutdown() == True:
+            needs_img = False
+        else:
+            needs_img = self.img_if.needs_data_check()
         return needs_img
 
     def imageStatusCb(self, status_msg, args):
@@ -472,130 +412,110 @@ class AutoTurretImgPub:
 
     def imageCb(self, image_msg, args):
         source_topic = args
-        needs_img = self.needsImgCheck()
-        if needs_img == False or self.imaging_enabled == False or source_topic != self.selected_image_topic or self.img_info_dict is None and nepi_sdk.is_shutdown() == False:
-            return
 
         if self.img_info_dict['img_connected'] == False:
             self.msg_if.pub_info('Connected to image topic: ' + source_topic)
         self.img_info_dict['img_connected'] = True
 
-
-        # Both are replaced whole by statusCb and never mutated in place, so a
-        # plain read is a consistent read.
-        sel_imgs = self.selected_image_topic
-        max_image_pub_rate_hz = self.max_image_pub_rate_hz
-        if source_topic != self.selected_image_topic or max_image_pub_rate_hz <= 0.01:
-            return
-
-        if self.img_info_dict['connected'] == False:
-            self.msg_if.pub_info("Got image topic: " + str(source_topic))
-        self.img_info_dict['connected'] = True
-
-        timestamp = float(image_msg.header.stamp.to_sec())
-        self.img_info_dict['get_latency_time'] = (nepi_utils.get_time() - timestamp)
-
-        start_time = nepi_utils.get_time()
-        max_image_pub_rate_hz = self.max_image_pub_rate_hz
-        if max_image_pub_rate_hz <= 0.01:
-            max_image_pub_rate_hz = 0.01
-        delay_time = float(1) / max_image_pub_rate_hz
-
-
-        last_img_time = self.img_info_dict['last_img_time']
-        current_time = nepi_utils.get_time()
-        if round((current_time - last_img_time), 3) <= delay_time:
-            return
-
-        self.img_info_dict['publishing'] = True
-
-        cv2_img = nepi_img.rosimg_to_cv2img(image_msg)
-
-        # status_dict is replaced whole by imageStatusCb and never mutated, so
-        # the reference is safe to read without a copy.
-        status_dict = self.img_info_dict['status_dict']
-        if status_dict is not None:
-            width_pixel = status_dict['width_px']
-            height_pixel = status_dict['height_px']
-            width_deg = status_dict['width_deg']
-            height_deg = status_dict['height_deg']
-        else:
-            width_pixel = 0
-            height_pixel = 0
-            width_deg = 100
-            height_deg = 70
-
-        targets_dict_list = copy.deepcopy(self.targets_dict_list)
-        draw_targets = (targets_dict_list is not None and self.show_targets_enabled == True)
-        targets_count = -1
-        # if targets_dict_list is not None:
-        #     targets_count = len(targets_dict_list)
-        #self.msg_if.pub_info('Publishing Image with targets: ' + str([draw_targets,targets_count]), throttle_s = 5)       
-
-        if draw_targets == True:
-            cv2_det_img = self.apply_detection_overlay(source_topic,targets_dict_list, cv2_img, OVERLAY_TARGETS_COLOR)
-        else:
-            cv2_det_img = copy.deepcopy(cv2_img)
-
-        
-        self.publishImgData(cv2_det_img,
-                            width_deg = width_deg,
-                            height_deg = height_deg,
-                            timestamp = timestamp,
-                            add_overlay_text_list = []
-                            )
-
-        if self.img_info_dict['img_published'] == False:
-            namespace = self.img_info_dict['pub_namespace']
-            self.msg_if.pub_info('Published image topic: ' + os.path.join(self.process_namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT))
-        self.img_info_dict['img_published'] = True
-
-    def publishImgData(self, cv2_img, encoding = "bgr8", timestamp = None,
-                        width_deg = 100,
-                        height_deg = 70,
-                        add_overlay_text_list = [],):
-        if self.imaging_enabled == False:
-            return
-
-        # The lock covers looking the publishers up, not publishing through them.
-        # Held across the publish it serialized the whole encode -- three products
-        # and every source behind one mutex, and any thread that so much as asked
-        # whether a product needed data waited behind that. A publisher torn down
-        # by unsubscribeImgTopic between the lookup and the publish raises, which
-        # is what the try/except below is for.
+        needs_img = self.needsImgCheck(source_topic)
           
-        if self.img_if.ready == False:
-            return
-        else:
+        if needs_img == True:
+
+
+            # Both are replaced whole by statusCb and never mutated in place, so a
+            # plain read is a consistent read.
+            sel_imgs = self.selected_image_topic
+            max_image_pub_rate_hz = self.max_image_pub_rate_hz
+            if source_topic != self.selected_image_topic or max_image_pub_rate_hz <= 0.01:
+                return
+
+            if self.img_info_dict['connected'] == False:
+                self.msg_if.pub_info("Got image topic: " + str(source_topic))
+            self.img_info_dict['connected'] = True
+
+            timestamp = float(image_msg.header.stamp.to_sec())
+            self.img_info_dict['get_latency_time'] = (nepi_utils.get_time() - timestamp)
+
+            start_time = nepi_utils.get_time()
+            max_image_pub_rate_hz = self.max_image_pub_rate_hz
+            if max_image_pub_rate_hz <= 0.01:
+                max_image_pub_rate_hz = 0.01
+            delay_time = float(1) / max_image_pub_rate_hz
+
+
+            last_img_time = self.img_info_dict['last_img_time']
+            current_time = nepi_utils.get_time()
+            if round((current_time - last_img_time), 3) <= delay_time:
+                return
+
+            self.img_info_dict['publishing'] = True
+
+            cv2_img = nepi_img.rosimg_to_cv2img(image_msg)
+            image_dict = copy.deepcopy(self.img_info_dict['status_dict'])
+
+            if draw_targets == True:
+
+                targets_results_dict = copy.deepcopy(self.targets_results_dict)
+                draw_targets = self.show_targets_enabled
+                controls_dict = dict()
+                cv2_img = self.process_results_image(cv2_img, image_dict, targets_results_dict, controls_dict)
+
+
+
+
+            # The lock covers looking the publishers up, not publishing through them.
+            # Held across the publish it serialized the whole encode -- three products
+            # and every source behind one mutex, and any thread that so much as asked
+            # whether a product needed data waited behind that. A publisher torn down
+            # by unsubscribeImgTopic between the lookup and the publish raises, which
+            # is what the try/except below is for.
+            
+
 
 
 
 
             draw_track = (self.show_track_enabled == True)
-            try:
-                if draw_track == True:
-                    [x_deg,y_deg] = [0,0]
-                    track_dict = copy.deepcopy(self.track_dict)
-                    if track_dict is not None:
-                        try:
-                            [x_deg,y_deg] = [track_dict['azimuth_deg'],track_dict['elevation_deg']]
-                        except Exception as e:
-                            self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
+            if draw_track == True:
 
-                    self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
 
-                if self.draw_track != draw_track:
-                    if draw_track == True:
-                        self.img_if.set_targets_size_ratio(0.4)
-                        self.img_if.set_targets_thickness_ratio(0.4)
-                        self.img_if.set_targets_text_ratio(0.3)
-                        self.img_if.set_overlay_target_degrees(True)
-                    else:
-                        self.img_if.remove_target('Track Goal')
-                    self.img_if.set_targets_enable(draw_track)
-                    self.draw_track = draw_track
-            except Exception as e:
-                self.msg_if.pub_info('Draw Target Failed: ' + str(track_dict) + " with exception: " + str(e), throttle_s = 5)
+                # status_dict is replaced whole by imageStatusCb and never mutated, so
+                # the reference is safe to read without a copy.
+                status_dict = self.img_info_dict['status_dict']
+                if status_dict is not None:
+                    width_pixel = status_dict['width_px']
+                    height_pixel = status_dict['height_px']
+                    width_deg = status_dict['width_deg']
+                    height_deg = status_dict['height_deg']
+                else:
+                    width_pixel = 0
+                    height_pixel = 0
+                    width_deg = 100
+                    height_deg = 70
+
+                try:
+                        [x_deg,y_deg] = [0,0]
+                        track_results = copy.deepcopy(self.track_results)
+                        if track_results is not None:
+                            try:
+                                [x_deg,y_deg] = [track_results['azimuth_deg'],track_results['elevation_deg']]
+                            except Exception as e:
+                                self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
+
+                        self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
+
+
+                        if draw_track == True:
+                            self.img_if.set_targets_size_ratio(0.4)
+                            self.img_if.set_targets_thickness_ratio(0.4)
+                            self.img_if.set_targets_text_ratio(0.3)
+                            self.img_if.set_overlay_target_degrees(True)
+                        else:
+                            self.img_if.remove_target('Track Goal')
+                        self.img_if.set_targets_enable(draw_track)
+                        self.draw_track = draw_track
+                except Exception as e:
+                    self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
 
 
             draw_crosshair = (self.show_goal_enabled == True)
@@ -617,168 +537,199 @@ class AutoTurretImgPub:
                 self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
 
 
+
             self.img_if.publish_cv2_img(cv2_img,
-                                encoding = encoding,
+                                encoding = "bgr8",
                                 timestamp = timestamp,
                                 width_deg = width_deg,
                                 height_deg = height_deg,
-                                add_overlay_text_list = add_overlay_text_list
-                                )
+                                add_overlay_text_list = []
+                                )         
+
+
+        if self.img_info_dict['img_published'] == False:
+            namespace = self.img_info_dict['pub_namespace']
+            self.msg_if.pub_info('Published image topic: ' + os.path.join(self.process_namespace, self.AUTO_TURRET_IMG_DATA_PRODUCT))
+        self.img_info_dict['img_published'] = True
 
 
 
 
-    def apply_detection_overlay(self,source_topic, boxes_dict_list, cv2_img, overlay_color = (0,0,127)):
-        cv2_det_img = copy.deepcopy(cv2_img)
-        cv2_shape = cv2_img.shape
-        img_width = cv2_shape[1] 
-        img_height = cv2_shape[0] 
-
-        for i, detect_dict in enumerate(boxes_dict_list):
-            img_size = cv2_img.shape[:2]
-
-            # Overlay text data on OpenCV image
-            font = OVERLAY_FONT
-            scale = 1.5e-3 - 0.1e-3 * math.ceil(max([img_height, img_width])/700)
-            fontScale, fontThickness  = nepi_img.optimal_font_dims(cv2_img,font_scale = scale, thickness_scale = scale, scale_ratio = 0.5) 
-            fontColor = (255, 255, 255)
-            fontColorBk = (0,0,0)
-            lineType = cv2.LINE_AA
 
 
-            ###### Apply Image Overlays and Publish Image ROS Message
-            # Overlay adjusted detection boxes on image 
-            class_name = detect_dict['name']
-            xmin = detect_dict['xmin']
-            ymin = detect_dict['ymin']
-            xmax = detect_dict['xmax']
-            ymax = detect_dict['ymax']
 
-            if xmin <= 0:
-                xmin = 5
-            if ymin <= 0:
-                ymin = 5
-            if xmax >= img_size[1]:
-                xmax = img_size[1] - 5
-            if ymax >= img_size[0]:
-                ymax = img_size[0] - 5
+    #############################
+    # Targets Results
+    def convert_results_pub_msg2dict(self, results_msg):
+        results_dict = nepi_sdk.convert_msg2dict(results_msg)
+        return results_dict
 
 
-            bot_left_box = (xmin, ymin)
-            top_right_box = (xmax, ymax)
+OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
+OVERLAY_TARGETS_COLOR = (255, 255, 255)
+OVERLAY_TRACK_COLOR = (255, 0, 0)
+
+    def process_results_image(self, cv2_img, status_dict, controls_dict, results_dict):
+        ##################
+        # Get Image Data
+        try:
+            cv2_img_results = copy.deepcopy(cv2_img)
+            cv2_shape = cv2_img.shape
+            img_width = cv2_shape[1] 
+            img_height = cv2_shape[0] 
+        except:
+            return cv2_img
+
+        if status_dict is None:
+            status_dict = dict()
+        width_deg = status_dict.get('width_deg', 100)
+        height_deg = status_dict.get('height_deg', 70)
+
+        ##################
+        # Get Controls Data
+        if controls_dict is None:
+            controls_dict = dict()
+        overlay_color = controls_dict.get('overlay_color',(0,0,127))
+        overlay_font = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT)
+        overlay_font_color = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT_COLOR)
+        overlay_line_type = controls_dict.get('overlay_color',nepi_img.OVERLAY_LINE_TYPE)
 
 
-            class_color = overlay_color
-           
-            #self.msg_if.pub_warn("Got Class Color: " + str(class_color) + ' type: ' + str(type(class_color)) + " type: " + str(type(class_color[0])) )
-            line_thickness = max(1, math.ceil(max([img_height, img_width])/2000))
-            
 
-            success = False
+
+
+        ##################
+        # Get Results Data
+        if results_dict is None:
+            results_dict = dict()       
+        targets_list = results_dict.get('targets', [])
+
+        ##################
+        # Process Results Image
+        for i, target_dict in enumerate(targets_list):
             try:
-                cv2.rectangle(cv2_det_img, bot_left_box, top_right_box, class_color, thickness=line_thickness)
-                success = True
-            except Exception as e:
-                self.msg_if.pub_warn("Failed to create bounding box rectangle: " + str(e))
+                img_size = cv2_img.shape[:2]
 
-            # Overlay text data on OpenCV image
-            if success == True:
-
-
-                ## Overlay Text
-                overlay_labels =  self.overlay_labels
-                overlay_range_bearing =  self.overlay_range_bearing
-
-                overlay_text = ""
-
-                if overlay_labels:
-                    overlay_text = overlay_text + class_name + " "
-                if overlay_range_bearing:
-                    rb_text = ''
-                    if detect_dict['range_m'] != -999 and detect_dict['range_m'] != '':
-                        rb_text = rb_text + str(round(detect_dict['range_m'],1)) + 'm :'
-                    if detect_dict['azimuth_deg'] != -999 and detect_dict['elevation_deg'] != -999:
-                        rb_text = rb_text + str(round(detect_dict['azimuth_deg'],1)) + 'deg '
-                        rb_text = rb_text + str(round(detect_dict['elevation_deg'],1)) + 'deg '
-                    if len(rb_text) > 0:
-                        overlay_text = overlay_text + rb_text
+                # Overlay text data on OpenCV image
+                font = overlay_font
+                scale = 1.5e-3 - 0.1e-3 * math.ceil(max([img_height, img_width])/700)
+                fontScale, fontThickness  = nepi_img.optimal_font_dims(cv2_img,font_scale = scale, thickness_scale = scale, scale_ratio = 0.5) 
+                fontColor = (255, 255, 255)
+                fontColorBk = (0,0,0)
+                lineType = overlay_line_type
 
 
+                ###### Apply Image Overlays and Publish Image ROS Message
+                # Overlay adjusted detection boxes on image 
+                class_name = target_dict['name']
+                xmin = target_dict['xmin_pixel']
+                ymin = target_dict['ymin_pixel']
+                xmax = target_dict['xmax_pixel']
+                ymax = target_dict['ymax_pixel']
 
-                if len(overlay_text) > 0:
-                    text2overlay=overlay_text
-                    text_size = cv2.getTextSize(text2overlay, 
-                        font, 
-                        fontScale,
-                        fontThickness)
-                    #self.msg_if.pub_warn("Text Size: " + str(text_size))
-                    line_height = text_size[0][1]
-                    line_width = text_size[0][0]
-                    x_padding = int(line_height*0.4)
-                    y_padding = int(line_height*0.4)
-                    
-                    center = bot_left_box[0] + int(( top_right_box[0] - bot_left_box[0]) / 2 )
-                    #bot_left_text = (xmin + (line_thickness * 2) + x_padding , ymin + line_height + (line_thickness * 2) + y_padding)
-                    bot_left_text = (center + x_padding , ymin - (line_thickness * 2) - y_padding)
-                    # Create Text Background Box
-                    #bot_left_box =  (bot_left_text[0] - x_padding , bot_left_text[1] + y_padding)
-                    bot_left_box =  ( center - x_padding, bot_left_text[1] + y_padding)
-                    top_right_box = (center + line_width + x_padding, bot_left_text[1] - line_height - y_padding )
-                    box_color = [0,0,0]
+                if xmin <= 0:
+                    xmin = 5
+                if ymin <= 0:
+                    ymin = 5
+                if xmax >= img_size[1]:
+                    xmax = img_size[1] - 5
+                if ymax >= img_size[0]:
+                    ymax = img_size[0] - 5
 
-                    try:
-                        cv2.rectangle(cv2_det_img, bot_left_box, top_right_box, box_color , -1)
-                        cv2.putText(cv2_det_img,text2overlay, 
-                            bot_left_text, 
+
+                bot_left_box = (xmin, ymin)
+                top_right_box = (xmax, ymax)
+
+
+                class_color = overlay_color
+            
+                #self.msg_if.pub_warn("Got Class Color: " + str(class_color) + ' type: ' + str(type(class_color)) + " type: " + str(type(class_color[0])) )
+                line_thickness = max(1, math.ceil(max([img_height, img_width])/2000))
+                
+
+                success = False
+                try:
+                    cv2.rectangle(cv2_img_results, bot_left_box, top_right_box, class_color, thickness=line_thickness)
+                    success = True
+                except Exception as e:
+                    self.msg_if.pub_warn("Failed to create bounding box rectangle: " + str(e))
+
+                # Overlay text data on OpenCV image
+                if success == True:
+
+
+                    ## Overlay Text
+                    overlay_labels =  self.overlay_labels
+                    overlay_range_bearing =  self.overlay_range_bearing
+
+                    overlay_text = ""
+
+                    if overlay_labels:
+                        overlay_text = overlay_text + class_name + " "
+                    if overlay_range_bearing:
+                        rb_text = ''
+                        if target_dict['range_m'] != -999 and target_dict['range_m'] != '':
+                            rb_text = rb_text + str(round(target_dict['range_m'],1)) + 'm :'
+                        if target_dict['azimuth_deg'] != -999 and target_dict['elevation_deg'] != -999:
+                            rb_text = rb_text + str(round(target_dict['azimuth_deg'],1)) + 'deg '
+                            rb_text = rb_text + str(round(target_dict['elevation_deg'],1)) + 'deg '
+                        if len(rb_text) > 0:
+                            overlay_text = overlay_text + rb_text
+
+
+
+                    if len(overlay_text) > 0:
+                        text2overlay=overlay_text
+                        text_size = cv2.getTextSize(text2overlay, 
                             font, 
                             fontScale,
-                            fontColor,
-                            fontThickness,
-                            lineType)
-                    except Exception as e:
-                        self.msg_if.pub_warn("Failed to apply overlay label text: " + str(e))
+                            fontThickness)
+                        #self.msg_if.pub_warn("Text Size: " + str(text_size))
+                        line_height = text_size[0][1]
+                        line_width = text_size[0][0]
+                        x_padding = int(line_height*0.4)
+                        y_padding = int(line_height*0.4)
+                        
+                        center = bot_left_box[0] + int(( top_right_box[0] - bot_left_box[0]) / 2 )
+                        #bot_left_text = (xmin + (line_thickness * 2) + x_padding , ymin + line_height + (line_thickness * 2) + y_padding)
+                        bot_left_text = (center + x_padding , ymin - (line_thickness * 2) - y_padding)
+                        # Create Text Background Box
+                        #bot_left_box =  (bot_left_text[0] - x_padding , bot_left_text[1] + y_padding)
+                        bot_left_box =  ( center - x_padding, bot_left_text[1] + y_padding)
+                        top_right_box = (center + line_width + x_padding, bot_left_text[1] - line_height - y_padding )
+                        box_color = [0,0,0]
 
-                    # Start name overlays    
-                    x_start = int(img_width * 0.05)
-                    y_start = int(img_height * 0.05)
+                        try:
+                            cv2.rectangle(cv2_img_results, bot_left_box, top_right_box, box_color , -1)
+                            cv2.putText(cv2_img_results,text2overlay, 
+                                bot_left_text, 
+                                font, 
+                                fontScale,
+                                fontColor,
+                                fontThickness,
+                                lineType)
+                        except Exception as e:
+                            self.msg_if.pub_warn("Failed to apply overlay label text: " + str(e))
+
+                        # Start name overlays    
+                        x_start = int(img_width * 0.05)
+                        y_start = int(img_height * 0.05)
+            except:
+                pass
+
+        return cv2_img_results
 
 
-        return cv2_det_img
-
-
-    def getBoxDict(self, entry_dict):
-        return {
-            'name': entry_dict.get('name', ''),
-            'xmin': entry_dict.get('xmin_pixel', 0),
-            'ymin': entry_dict.get('ymin_pixel', 0),
-            'xmax': entry_dict.get('xmax_pixel', 0),
-            'ymax': entry_dict.get('ymax_pixel', 0),
-            'range_m': entry_dict.get('range_m', -999),
-            'azimuth_deg': entry_dict.get('azimuth_deg', -999),
-            'elevation_deg': entry_dict.get('elevation_deg', -999),
-        }
-
-    def targetsCb(self, msg, args):
+    def targetsResultsCb(self, results_msg, args):
         source_topic = args
         if source_topic != self.selected_image_topic or nepi_sdk.is_shutdown() == True:
             return
+        self.targets_results_dict = self.convert_results_pub_msg2dict(results_msg)
+        self.targets_time = nepi_utils.get_time()
 
-        current_time = nepi_utils.get_time()
-        # msg.targets is an Targets[] array -- convert_msg2dict takes a single
-        # message, so convert per entry.
-        targets_list = []
-        for target_msg in msg.targets:
-            targets_list.append(nepi_sdk.convert_msg2dict(target_msg))
-
-        targets_dict_list = []
-        for target in targets_list:
-            targets_dict_list.append(self.getBoxDict(target))
-        self.targets_dict_list = targets_dict_list
-        self.last_targets_time = nepi_utils.get_time()
-
-    def trackCb(self, msg):
-        self.track_dict = nepi_sdk.convert_msg2dict(msg)
-        self.last_track_time = nepi_utils.get_time()
+    def trackResultsCb(self, msg):
+        self.track_results = nepi_sdk.convert_msg2dict(msg)
+        self.track_results_time = nepi_utils.get_time()
 
     def statusCb(self, msg):
         self.last_status_time = nepi_utils.get_time()

@@ -40,7 +40,7 @@ import NepiIFConnectNavPose from "./Nepi_IF_ConnectNavPose"
 import NepiIFSaveData from "./Nepi_IF_SaveData"
 import NepiIFConfig from "./Nepi_IF_Config"
 
-import Nepi_IF_ConnectProcess from "./Nepi_IF_ConnectProcess"
+import Nepi_IF_Process from "./Nepi_IF_Process"
 
 import { createMenuFirstLastName, createMenuFirstLastNames, onChangeChangeStateValue } from "./Utilities"
 import { setElementStyleModified, clearElementStyleModified } from "./Utilities"
@@ -60,7 +60,7 @@ function round(value, decimals = 0) {
 // This page binds to ONE app node, not to a manager list. The status topic is
 // <app>/status carrying nepi_app_auto_turret/AutoTurretStatus, and every command
 // topic hangs off the app namespace. The algorithm's own controls are rendered by
-// the shared Nepi_IF_ConnectProcess against status_msg.controls_topic -- a field
+// the shared Nepi_IF_Process against status_msg.controls_topic -- a field
 // AutoTurretStatus does not yet define, so that block falls back to <app>/controls
 // and stays empty until either the field or a ControlsIF is added.
 class NepiAppAutoTurret extends Component {
@@ -1097,7 +1097,7 @@ class NepiAppAutoTurret extends Component {
  
 
       { ( show_control === 'scan' ) ?
-      <Nepi_IF_ConnectProcess
+      <Nepi_IF_Process
         make_section={false}
         title={null}
         namespace={ status_msg.scan_process_namespace}
@@ -1107,7 +1107,7 @@ class NepiAppAutoTurret extends Component {
 
 
       { ( show_control === 'track' ) ?
-      <Nepi_IF_ConnectProcess
+      <Nepi_IF_Process
         make_section={false}
         title={null}
         namespace={ status_msg.track_process_namespace}
@@ -1116,7 +1116,7 @@ class NepiAppAutoTurret extends Component {
         : null}
 
       { ( show_control === 'stab' ) ?
-      <Nepi_IF_ConnectProcess
+      <Nepi_IF_Process
         make_section={false}
         title={null}
         namespace={ status_msg.stab_process_namespace}
@@ -1160,7 +1160,7 @@ class NepiAppAutoTurret extends Component {
 
       { ( show_control === 'auto' ) ?
 
-      <Nepi_IF_ConnectProcess
+      <Nepi_IF_Process
         make_section={false}
         title={null}
         namespace={ status_msg.auto_process_namespace}

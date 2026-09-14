@@ -40,8 +40,8 @@ from nepi_sdk import nepi_process_track
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
-from nepi_api.system_if import SaveDataIF
-from nepi_api.process_if import ProcessIF
+from nepi_api.system_if import ProcessIF, SaveDataIF
+
 from nepi_api.connect_device_if_ptx import ConnectPTXDeviceIF
 from nepi_api.connect_data_if import ConnectImageIF
 from nepi_api.connect_data_if import ConnectNavPoseIF
@@ -149,7 +149,7 @@ class NepiAutoTurretApp(object):
 
 
   track_process_name = 'process_track'
-  track_process_class_instance = nepi_process_track
+  track_process_module = nepi_process_track
   track_process_if = None
   tracking_enabled = False
 
@@ -638,7 +638,7 @@ class NepiAutoTurretApp(object):
     self.track_process_if = ProcessIF(process_name = self.track_process_name,
                 process_group = self.node_name,
                 process_description = self.track_process_name,
-                process_class_instance = self.track_process_class_instance,
+                process_module = self.track_process_module,
                 show_process = True,
                 show_controls = True,
                 show_results = True,
@@ -1120,8 +1120,7 @@ class NepiAutoTurretApp(object):
         self.track_process_if.init()
       if self.stab_process_if is not None:
         self.stab_process_if.init()
-      if self.track_process_if is not None:
-        self.track_process_if.init()
+
 
     if do_updates == True:
       pass
@@ -1137,8 +1136,7 @@ class NepiAutoTurretApp(object):
       self.track_process_if.reset()
     if self.stab_process_if is not None:
       self.stab_process_if.reset()
-    if self.track_process_if is not None:
-      self.track_process_if.reset()
+
 
     if self.node_if is not None:
       pass
@@ -1156,8 +1154,7 @@ class NepiAutoTurretApp(object):
       self.track_process_if.factory_reset()
     if self.stab_process_if is not None:
       self.stab_process_if.factory_reset()
-    if self.track_process_if is not None:
-      self.track_process_if.factory_reset()
+
     if self.node_if is not None:
       pass
     if do_updates == True:

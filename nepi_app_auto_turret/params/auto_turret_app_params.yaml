@@ -1,6 +1,6 @@
 APP_DICT:
   display_name: Auto Turret
-  description: Pan Tilt turret automation application
+  description: Turret PanTilt automation application
   pkg_name: nepi_app_auto_turret
   group_name: AUTOMATION
   config_file: app_auto_turret.yaml
