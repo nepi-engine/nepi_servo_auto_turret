@@ -33,7 +33,7 @@ from sensor_msgs.msg import Image
 
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import Targets
-from nepi_interfaces.msg import ProcessResultsTrack
+from nepi_interfaces.msg import Track
 
 from nepi_app_auto_turret.msg import AutoTurretStatus
 
@@ -174,7 +174,7 @@ class AutoTurretImgPub:
                 'callback_args': ()
             },
             'auto_turret_track_sub': {
-                'msg': ProcessResultsTrack,
+                'msg': Track,
                 'namespace': self.process_namespace + '/process_track',
                 'topic': 'track',
                 'qsize': 10,
@@ -554,10 +554,6 @@ class AutoTurretImgPub:
 
 
 
-
-
-
-
     #############################
     # Targets Results
     def convert_results_pub_msg2dict(self, results_msg):
@@ -565,9 +561,9 @@ class AutoTurretImgPub:
         return results_dict
 
 
-OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
-OVERLAY_TARGETS_COLOR = (255, 255, 255)
-OVERLAY_TRACK_COLOR = (255, 0, 0)
+    OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
+    OVERLAY_TARGETS_COLOR = (255, 255, 255)
+    OVERLAY_TRACK_COLOR = (255, 0, 0)
 
     def process_results_image(self, cv2_img, status_dict, controls_dict, results_dict):
         ##################
