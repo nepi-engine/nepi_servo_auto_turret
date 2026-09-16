@@ -75,6 +75,7 @@ class AutoTurretImgPub:
     img_info_lock = threading.Lock()
 
     targets_results_msg = []
+    targets_dict = []
     targets_lock = threading.Lock()
     targets_time = 0
     show_targets_enabled = False
@@ -325,7 +326,7 @@ class AutoTurretImgPub:
         cur_time = nepi_utils.get_time()
         elapsed = cur_time - self.targets_time
         if elapsed > WATCHDOG_TARGETS_TIMEOUT:
-            self.targets_results_dict = None
+            self.targets_dict = []
 
         cur_time = nepi_utils.get_time()
         elapsed = cur_time - self.track_results_time
@@ -421,6 +422,20 @@ class AutoTurretImgPub:
           
         if needs_img == True:
 
+            # status_dict is replaced whole by imageStatusCb and never mutated, so
+            # the reference is safe to read without a copy.
+            status_dict = self.img_info_dict.get('status_dict',None)
+            if status_dict is not None:
+                width_pixel = status_dict['width_px']
+                height_pixel = status_dict['height_px']
+                width_deg = status_dict['width_deg']
+                height_deg = status_dict['height_deg']
+            else:
+                width_pixel = 0
+                height_pixel = 0
+                width_deg = 100
+                height_deg = 70
+
 
             # Both are replaced whole by statusCb and never mutated in place, so a
             # plain read is a consistent read.
@@ -451,14 +466,15 @@ class AutoTurretImgPub:
             self.img_info_dict['publishing'] = True
 
             cv2_img = nepi_img.rosimg_to_cv2img(image_msg)
-            image_dict = copy.deepcopy(self.img_info_dict['status_dict'])
+            img_status_dict = copy.deepcopy(self.img_info_dict['status_dict'])
 
+
+
+            targets_dict = copy.deepcopy(self.targets_dict)
+            controls_dict = dict()
+            draw_targets = (self.show_targets_enabled == True)
             if draw_targets == True:
-
-                targets_results_dict = copy.deepcopy(self.targets_results_dict)
-                draw_targets = self.show_targets_enabled
-                controls_dict = dict()
-                cv2_img = self.process_results_image(cv2_img, image_dict, targets_results_dict, controls_dict)
+                cv2_img = self.process_targets_image(cv2_img, img_status_dict, controls_dict, targets_dict)
 
 
 
@@ -471,7 +487,7 @@ class AutoTurretImgPub:
             # is what the try/except below is for.
             
 
-
+        
 
 
 
@@ -479,19 +495,7 @@ class AutoTurretImgPub:
             if draw_track == True:
 
 
-                # status_dict is replaced whole by imageStatusCb and never mutated, so
-                # the reference is safe to read without a copy.
-                status_dict = self.img_info_dict['status_dict']
-                if status_dict is not None:
-                    width_pixel = status_dict['width_px']
-                    height_pixel = status_dict['height_px']
-                    width_deg = status_dict['width_deg']
-                    height_deg = status_dict['height_deg']
-                else:
-                    width_pixel = 0
-                    height_pixel = 0
-                    width_deg = 100
-                    height_deg = 70
+
 
                 try:
                         [x_deg,y_deg] = [0,0]
@@ -565,7 +569,7 @@ class AutoTurretImgPub:
     OVERLAY_TARGETS_COLOR = (255, 255, 255)
     OVERLAY_TRACK_COLOR = (255, 0, 0)
 
-    def process_results_image(self, cv2_img, status_dict, controls_dict, results_dict):
+    def process_targets_image(self, cv2_img, img_status_dict, controls_dict, results_dict):
         ##################
         # Get Image Data
         try:
@@ -576,10 +580,10 @@ class AutoTurretImgPub:
         except:
             return cv2_img
 
-        if status_dict is None:
-            status_dict = dict()
-        width_deg = status_dict.get('width_deg', 100)
-        height_deg = status_dict.get('height_deg', 70)
+        if img_status_dict is None:
+            img_status_dict = dict()
+        width_deg = img_status_dict.get('width_deg', 100)
+        height_deg = img_status_dict.get('height_deg', 70)
 
         ##################
         # Get Controls Data
@@ -589,9 +593,6 @@ class AutoTurretImgPub:
         overlay_font = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT)
         overlay_font_color = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT_COLOR)
         overlay_line_type = controls_dict.get('overlay_color',nepi_img.OVERLAY_LINE_TYPE)
-
-
-
 
 
         ##################
@@ -720,7 +721,7 @@ class AutoTurretImgPub:
         source_topic = args
         if source_topic != self.selected_image_topic or nepi_sdk.is_shutdown() == True:
             return
-        self.targets_results_dict = self.convert_results_pub_msg2dict(results_msg)
+        self.targets_dict = self.convert_results_pub_msg2dict(results_msg)
         self.targets_time = nepi_utils.get_time()
 
     def trackResultsCb(self, msg):

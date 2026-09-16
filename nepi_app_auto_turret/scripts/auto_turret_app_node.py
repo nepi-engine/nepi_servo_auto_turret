@@ -136,27 +136,27 @@ class NepiAutoTurretApp(object):
   min_max_image_pub_rates = [1,20]
   max_image_pub_rate_hz = 10.0
 
-  auto_process_name = 'process_auto'
+  auto_process_name = 'auto'
   auto_process_namespace = ''
   auto_process_if = None
   auto_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
   auto_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
   scanning_enabled = False
-  scan_process_name = 'process_scan'
+  scan_process_name = 'scan'
   scan_process_namespace = ''
   scan_process_if = None
   scan_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
   scan_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
 
-  track_process_name = 'process_track'
+  track_process_name = 'track'
   track_process_module = nepi_process_track
   track_process_if = None
   tracking_enabled = False
 
   stabilize_enabled = False
-  stab_process_name = 'process_stab'
+  stab_process_name = 'stab'
   stab_process_namespace = ''
   stab_process_if = None
   stab_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
@@ -638,6 +638,7 @@ class NepiAutoTurretApp(object):
     # )  
 
     self.track_process_if = ProcessTrackIF(
+                process_name = self.track_process_name,
                 log_name = None,
                 log_name_list = [],
                 msg_if = self.msg_if,
@@ -773,7 +774,9 @@ class NepiAutoTurretApp(object):
   def stopTiltCb(self):
     self.tilt_goto = UNSET_VALUE
 
-  def targetsCb(self, targets_dict):
+  def targetsCb(self, targets_dict):    
+
+
     #self.msg_if.pub_info("Targets callback got new targets mgs: " + str(targets_dict), throttle_s = 10)
     self.last_targets_time = nepi_utils.get_time()
     self.targets_lock.acquire()
@@ -783,11 +786,25 @@ class NepiAutoTurretApp(object):
       self.msg_if.pub_warn("Failed to convert Targets Dict : " + str(targets_dict) + " : " + str(e), throttle_s = 10)
     
     self.targets_lock.release()
+
+
+    # data_dict = targets_dict['data']
+    # timestamps=[data_dict['timestamp'],data_dict['source_timestamp']] 
+    # targets_list = data_dict['targets']
+    # for target in targets_list:
+    #     timestamps.append(target['timestamp'])
+    # self.msg_if.pub_warn("Got Targets timestamps" + str(timestamps), throttle_s = 10)
+
     #self.msg_if.pub_warn("Added target list for name " + str(target_dict['target_name']))
         
   def targetsStatusCb(self, status_dict):
     #self.msg_if.pub_info("Targets Status callback got new status mgs: " + str(status_dict), throttle_s = 10)
-    self.targets_classes = status_dict['available_classes']
+    first_classes = self.targets_classes is None
+    targets_classes = status_dict['available_classes']
+    if len(targets_classes) > 0:
+      self.targets_classes = targets_classes
+    if first_classes == True:
+      self.msg_if.pub_warn("Got first classes list " + str(self.targets_classes))
     
 
   def setAutoSelectEnableCb(self, msg):
@@ -1223,79 +1240,90 @@ class NepiAutoTurretApp(object):
     if self.track_process_if is not None:
 
       ### Update Data Dict
-      self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)
+      self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)  
+      
+
       self.track_process_if.set_data_value('navpose_dict', navpose_dict)
 
 
       ### Update Process Dictionaries
 
       track_classes = self.track_classes
+      class_filters = []
       if targets_classes is not None:
-        self.track_process_if.set_control_options('class_filters', targets_classes)
-        class_filters = self.track_process_if.get_control_value('class_filters')
-        if class_filters == [] and track_classes is None:
-          self.track_process_if.set_control_value('class_filters',targets_classes)
-        if track_classes is None:
-          self.track_classes = self.track_process_if.get_control_value('class_filters')
+        if targets_classes != []:
+          self.track_process_if.set_control_options('class_filters', targets_classes)
+          class_filters = self.track_process_if.get_control_value('class_filters')
+          if class_filters == [] and track_classes is None:
+            self.track_process_if.set_control_value('class_filters',targets_classes)
+          if class_filters != [] and track_classes is None:
+            self.track_classes = self.track_process_if.get_control_value('class_filters')
+
+      #self.msg_if.pub_warn("Got track classes: " + str([class_filters, track_classes, targets_classes]), throttle_s = 10)
           
       ### Process Results
       track_process_results = self.track_process_if.process_results(source_topic = source_image_topic)
-
+      # self.msg_if.pub_warn("Got track_process_results: " + str(track_process_results), throttle_s = 10)
 
 
     
     #####################
     # Update Auto Process Data
+    [pan_now_deg,tilt_now_deg] = [0,0]
+    pantilt_status_dict = nepi_sdk.convert_msg2dict(DevicePTXStatus())
     pantilt_connect_if = self.pantilt_connect_if
-
     if pantilt_connect_if is not None:
       try:
-        pantilt_status_dict = pantilt_connect_if.get_status_dict()
         [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
-      
-        pan_goal_deg = pantilt_status_dict['pan_goal_deg']
-        tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
-
-        pan_now_ratio = pantilt_status_dict['pan_now_ratio']
-        tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
-
-        pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
-        tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
+        status_dict = pantilt_connect_if.get_status_dict()
+        #self.msg_if.pub_warn("Got pantilt_status_dict: " + str(pantilt_status_dict), throttle_s = 10)
+        if status_dict is not None:
+          pantilt_status_dict
 
 
-        has_limit_controls = pantilt_status_dict['has_limit_controls']
-        pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
-        pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
-        tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
-        tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
-
-        pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
-        pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
-        tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
-        tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
-
-
-        if pan_manual == True:
-          auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
-        else:
-          auto_pan_error_deg = 0
-
-        auto_results['auto_pan_error_deg'] = auto_pan_error_deg
-
-        if tilt_manual == True:
-          auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
-        else:
-          auto_tilt_error_deg = 0
-
-        auto_results['auto_tilt_error_deg'] = auto_tilt_error_deg
       except Exception as e:
         self.msg_if.pub_warn("Failed to process auto pt errors: " + str(e), throttle_s = 5)
         pass
 
+
+    pan_goal_deg = pantilt_status_dict['pan_goal_deg']
+    tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
+
+    pan_now_ratio = pantilt_status_dict['pan_now_ratio']
+    tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
+
+    pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
+    tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
+
+
+    has_limit_controls = pantilt_status_dict['has_limit_controls']
+    pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
+    pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
+    tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
+    tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
+
+    pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
+    pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
+    tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
+    tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
+
+
     #####################
     # Apply Process Outputs
     #####################
+    if pan_manual == True:
+      auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
+    else:
+      auto_pan_error_deg = 0
 
+    auto_results['auto_pan_error_deg'] = auto_pan_error_deg
+
+    if tilt_manual == True:
+      auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
+    else:
+      auto_tilt_error_deg = 0
+
+    auto_results['auto_tilt_error_deg'] = auto_tilt_error_deg
 
     #####################
     # Update Auto Pan Status Values
