@@ -109,7 +109,8 @@ class NepiAppAutoTurret extends Component {
     this.renderPTButtons = this.renderPTButtons.bind(this)
     this.renderPTControls = this.renderPTControls.bind(this)
     this.renderImageViewer = this.renderImageViewer.bind(this)
-    this.rendeAutoControls = this.rendeAutoControls.bind(this)
+    this.renderConnections = this.renderConnections.bind(this)
+    this.renderAutoControls = this.renderAutoControls.bind(this)
 
   }
 
@@ -312,7 +313,7 @@ class NepiAppAutoTurret extends Component {
           </div>
 
 
-          {this.rendeAutoControls()}
+          {this.renderAutoControls()}
 
         <NepiIFConfig
           namespace={this.getAppNamespace()}
@@ -791,6 +792,7 @@ class NepiAppAutoTurret extends Component {
         const show_targets_enabled = status_msg.show_targets_enabled
         const show_track_enabled = status_msg.show_track_enabled
         const show_goal_enabled = status_msg.show_goal_enabled
+        const image_stab_enabled = status_msg.image_stab_enabled
 
 
         const pantilt_namespace = status_msg.selected_pantilt_topic
@@ -846,7 +848,7 @@ class NepiAppAutoTurret extends Component {
                             </div>
 
         
-                          <div style={{ width: '5%' }} centered={"true"} >
+                          <div style={{ width: '4%' }} centered={"true"} >
                               {null}
                             </div>
 
@@ -865,7 +867,7 @@ class NepiAppAutoTurret extends Component {
 
                             </div>
 
-                            <div style={{ width: '5%' }} centered={"true"} >
+                            <div style={{ width: '4%' }} centered={"true"} >
                               {null}
                             </div>
 
@@ -881,7 +883,7 @@ class NepiAppAutoTurret extends Component {
                             </div>
 
 
-                        <div style={{ width: '5%' }} centered={"true"} >
+                        <div style={{ width: '4%' }} centered={"true"} >
                               {null}
                             </div>
 
@@ -899,10 +901,22 @@ class NepiAppAutoTurret extends Component {
                             </div>
 
 
-                            <div style={{ width: '5%' }} centered={"true"} >
+                            <div style={{ width: '4%' }} centered={"true"} >
                               {null}
                             </div>
 
+
+                            <div style={{ width: '10%' }} centered={"true"}>
+
+                  <Label title="Image Stab">
+                    <AsyncToggle
+                      checked={image_stab_enabled === true}
+                      onClick={() => sendBoolMsg(app_namespace + "/set_image_stab_enable", image_stab_enabled === false)}>
+                    </AsyncToggle>
+                  </Label>
+
+
+                            </div>
 
                             {/* Image Stab toggle: no image_stab field in AutoTurretStatus yet.
                                 A second Full Screen toggle and a source-selector slot were also
@@ -987,10 +1001,7 @@ class NepiAppAutoTurret extends Component {
 
 
 
-
-
-
-  rendeAutoControls() {
+  renderConnections() {
     const { sendBoolMsg } = this.props.ros
     const app_namespace = this.getAppNamespace()
 
@@ -1017,160 +1028,10 @@ class NepiAppAutoTurret extends Component {
         const show_control = this.state.show_control
         return (
           <React.Fragment>
-   
-       
-          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
-
-    
-          <Label title={"Process Settings"}></Label>
-
-   
+  
 
 
-
-                  <div style={{ display: 'flex' }} >
-                    <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
-                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-                    <div style={{ display: "inline-block", width: "20%"}}>{"Track"}</div>
-                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-                    <div style={{ display: "inline-block", width: "20%" }}>{"Stab"}</div>
-                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-                    <div style={{ display: "inline-block", width: "20%" }}>{"Auto"}</div>
-                  </div>
-
-                  <div style={{ display: 'flex' }} >
-
-                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
-
-                        <Toggle
-                        checked={(show_control === 'scan')}
-                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'scan') ? 'None' : 'scan' )}>
-                        </Toggle>
-                  </div>
-
-                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-
-
-                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
-
-                        <Toggle
-                        checked={(show_control === 'track')}
-                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'track') ? 'None' : 'track' )}>
-                        </Toggle>
-                  </div>
-
-                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-
-
-                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
-
-                        <Toggle
-                        checked={(show_control === 'stab')}
-                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'stab') ? 'None' : 'stab' )}>
-                        </Toggle>
-                  </div>
-
-                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
-
-
-                    <div style={{ display: "inline-block", width: "20%", float: "left" }}>
-                        <Toggle
-                          checked={(show_control === 'auto')}
-                          onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'auto') ? 'None' : 'auto' )}>
-                        </Toggle>
-
-
-                    </div>
-
-
-              </div>
-
-      { ( show_control !== 'None' ) ?
-      <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
-
-        : null}
-
-
-      { ( show_control !== 'None' ) ?
-           <Label title={show_control.toUpperCase() + ' Process'}></Label>
-        : null}
- 
-
-      { ( show_control === 'scan' ) ?
-      <Nepi_IF_Process
-        make_section={false}
-        title={null}
-        namespace={ status_msg.scan_process_namespace}
-        allways_show_controls={true}
-        />
-        : null}
-
-
-      { ( show_control === 'track' ) ?
-      <Nepi_IF_Process
-        make_section={false}
-        title={null}
-        namespace={ status_msg.track_process_namespace}
-        allways_show_controls={true}
-        />
-        : null}
-
-      { ( show_control === 'stab' ) ?
-      <Nepi_IF_Process
-        make_section={false}
-        title={null}
-        namespace={ status_msg.stab_process_namespace}
-        allways_show_controls={true}
-        />
-        : null}
-
-
-
-
-
-    { ( show_control === 'auto' ) ?
-     <SliderAdjustment
-          title={"Max Process Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_process_rate_hz}
-          topic={app_namespace + "/set_max_process_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets process max rate in hz"}
-          unit={"Hz"}
-        />
-        : null}
-{/*         
-    { ( show_control === 'auto' ) ?
-        <SliderAdjustment
-          title={"Max Image Publish Rate"}
-          msgType={"std_msgs/Float32"}
-          adjustment={max_image_pub_rate_hz}
-          topic={app_namespace + "/set_max_image_pub_rate"}
-          scaled={1.0}
-          min={1}
-          max={20}
-          disabled={false}
-          tooltip={"Sets overlay image max publish rate in hz"}
-          unit={"Hz"}
-        />
-        : null} */}
-
-      { ( show_control === 'auto' ) ?
-
-      <Nepi_IF_Process
-        make_section={false}
-        title={null}
-        namespace={ status_msg.auto_process_namespace}
-        allways_show_controls={true}
-        />
-        : null}
-
-
-
-          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+          <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
         <Label title={"Process Connections"}></Label>
 
@@ -1237,6 +1098,195 @@ class NepiAppAutoTurret extends Component {
           show_data={false}
           make_section={false}
         />
+
+            </React.Fragment>
+        )
+  }
+}
+
+
+  renderAutoControls() {
+    const { sendBoolMsg } = this.props.ros
+    const app_namespace = this.getAppNamespace()
+
+    const status_msg = this.state.status_msg
+
+
+    if (status_msg == null || app_namespace == null){
+      return(
+
+        <Columns>
+        <Column>
+
+        </Column>
+        </Columns>
+
+      )
+
+    }
+    else {
+ 
+        const max_process_rate_hz = status_msg.max_process_rate_hz
+        const max_image_pub_rate_hz = status_msg.max_image_pub_rate_hz
+        const auto_select_active = status_msg.auto_select_enabled
+        const show_control = this.state.show_control
+        return (
+          <React.Fragment>
+   
+       
+          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
+
+    
+          <Label title={"Settings"}></Label>
+
+                  <div style={{ display: 'flex' }} >
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Auto"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Scan"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%"}}>{"Track"}</div>
+                    <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+                    <div style={{ display: "inline-block", width: "20%" }}>{"Stab"}</div>
+
+                  </div>
+
+                  <div style={{ display: 'flex' }} >
+
+
+
+                    <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+                        <Toggle
+                          checked={(show_control === 'auto')}
+                          onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'auto') ? 'None' : 'auto' )}>
+                        </Toggle>
+
+
+                    </div>
+                    
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'scan')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'scan') ? 'None' : 'scan' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'track')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'track') ? 'None' : 'track' )}>
+                        </Toggle>
+                  </div>
+
+                  <div style={{ display: "inline-block", width: "5%"}}>{}</div>
+
+
+                  <div style={{ display: "inline-block", width: "20%", float: "left" }}>
+
+                        <Toggle
+                        checked={(show_control === 'stab')}
+                        onClick={() => onChangeChangeStateValue.bind(this)("show_control",(show_control === 'stab') ? 'None' : 'stab' )}>
+                        </Toggle>
+                  </div>
+
+
+
+              </div>
+
+      { ( show_control !== 'None' ) ?
+      <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+
+        : null}
+
+
+      { ( show_control !== 'None' ) ?
+           <Label title={show_control.toUpperCase() + ' Process'}></Label>
+        : null}
+ 
+
+      { ( show_control === 'scan' ) ?
+      <Nepi_IF_Process
+        make_section={false}
+        title={null}
+        namespace={ status_msg.scan_process_namespace}
+        allways_show_controls={true}
+        />
+        : null}
+
+
+      { ( show_control === 'track' ) ?
+      <Nepi_IF_Process
+        make_section={false}
+        title={null}
+        namespace={ status_msg.track_process_namespace}
+        allways_show_controls={true}
+        />
+        : null}
+
+      { ( show_control === 'stab' ) ?
+      <Nepi_IF_Process
+        make_section={false}
+        title={null}
+        namespace={ status_msg.stab_process_namespace}
+        allways_show_controls={true}
+        />
+        : null}
+
+
+
+      { ( show_control === 'auto' ) ?
+        this.renderConnections()
+        : null}
+
+    { ( show_control === 'auto' ) ?
+     <SliderAdjustment
+          title={"Max Process Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_process_rate_hz}
+          topic={app_namespace + "/set_max_process_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets process max rate in hz"}
+          unit={"Hz"}
+        />
+        : null}
+{/*         
+    { ( show_control === 'auto' ) ?
+        <SliderAdjustment
+          title={"Max Image Publish Rate"}
+          msgType={"std_msgs/Float32"}
+          adjustment={max_image_pub_rate_hz}
+          topic={app_namespace + "/set_max_image_pub_rate"}
+          scaled={1.0}
+          min={1}
+          max={20}
+          disabled={false}
+          tooltip={"Sets overlay image max publish rate in hz"}
+          unit={"Hz"}
+        />
+        : null} */}
+
+      { ( show_control === 'auto' ) ?
+
+      <Nepi_IF_Process
+        make_section={false}
+        title={null}
+        namespace={ status_msg.auto_process_namespace}
+        allways_show_controls={true}
+        />
+        : null}
+
+
+
+   
 
             </React.Fragment>
         )

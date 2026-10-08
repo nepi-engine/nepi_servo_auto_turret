@@ -50,9 +50,12 @@ WATCHDOG_TARGETS_TIMEOUT = 1
 WATCHDOG_TRACK_TIMEOUT = 1
 
 
+OVERLAY_TARGETS_COLOR = (255, 255, 255)
+OVERLAY_TRACK_COLOR = (0,255, 0)
+OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
 class AutoTurretImgPub:
 
-    AUTO_TURRET_IMG_DATA_PRODUCT = 'process_image'
+    AUTO_TURRET_IMG_DATA_PRODUCT = 'auto_image'
 
     DATA_PRODUCTS = [AUTO_TURRET_IMG_DATA_PRODUCT]
 
@@ -75,7 +78,7 @@ class AutoTurretImgPub:
     img_info_lock = threading.Lock()
 
     targets_results_msg = []
-    targets_dict = []
+    targets_results = None
     targets_lock = threading.Lock()
     targets_time = 0
     show_targets_enabled = False
@@ -108,6 +111,7 @@ class AutoTurretImgPub:
     draw_targets = False
     draw_track = False
     draw_crosshair = False
+    image_stab_enabled = False
 
 
     DEFAULT_NODE_NAME = "auto_turret_img_pub"  # Can be overwritten by launch command
@@ -176,7 +180,7 @@ class AutoTurretImgPub:
             },
             'auto_turret_track_sub': {
                 'msg': Track,
-                'namespace': self.process_namespace + '/process_track',
+                'namespace': self.process_namespace,
                 'topic': 'track',
                 'qsize': 10,
                 'callback': self.trackResultsCb,
@@ -326,7 +330,7 @@ class AutoTurretImgPub:
         cur_time = nepi_utils.get_time()
         elapsed = cur_time - self.targets_time
         if elapsed > WATCHDOG_TARGETS_TIMEOUT:
-            self.targets_dict = []
+            self.targets_results = None
 
         cur_time = nepi_utils.get_time()
         elapsed = cur_time - self.track_results_time
@@ -344,7 +348,7 @@ class AutoTurretImgPub:
             self.img_node_dict = dict()
             self.img_node_dict['img_sub'] = nepi_sdk.create_subscriber(source_topic, Image, self.imageCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
             self.img_node_dict['img_status_sub'] = nepi_sdk.create_subscriber(source_topic + '/status', ImageStatus, self.imageStatusCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
-            self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsResultsCb, queue_size = 1, callback_args = (source_topic), log_name_list = [])
+            self.img_node_dict['targets_sub'] = nepi_sdk.create_subscriber(source_topic + '/targets', Targets, self.targetsResultsCb, queue_size = 1, log_name_list = [])
             self.img_node_lock.release()
 
         if self.img_info_dict is None:
@@ -469,79 +473,75 @@ class AutoTurretImgPub:
             img_status_dict = copy.deepcopy(self.img_info_dict['status_dict'])
 
 
-
-            targets_dict = copy.deepcopy(self.targets_dict)
-            controls_dict = dict()
+            #########################\
             draw_targets = (self.show_targets_enabled == True)
-            if draw_targets == True:
-                cv2_img = self.process_targets_image(cv2_img, img_status_dict, controls_dict, targets_dict)
+            if draw_targets == True:       
+                targets_list = []     
+                targets_results = copy.deepcopy(self.targets_results)
+                if targets_results is not None:
+                    targets_list = targets_results.get('targets', [])
+                
+                if len(targets_list) == 0:
+                    #self.msg_if.pub_info('No Targets to Draw: ', throttle_s = 5)
+                    pass
+                else:
+                    #self.msg_if.pub_info('Got Targets len: ' + str(len(targets_list)), throttle_s = 5)
+                    controls_dict = dict()
+                    controls_dict['overlay_color'] = OVERLAY_TARGETS_COLOR
+                    cv2_img = self.process_targets_image(cv2_img, img_status_dict, controls_dict, targets_results)
 
-
-
-
-            # The lock covers looking the publishers up, not publishing through them.
-            # Held across the publish it serialized the whole encode -- three products
-            # and every source behind one mutex, and any thread that so much as asked
-            # whether a product needed data waited behind that. A publisher torn down
-            # by unsubscribeImgTopic between the lookup and the publish raises, which
-            # is what the try/except below is for.
-            
-
-        
-
-
-
+            #########################
             draw_track = (self.show_track_enabled == True)
             if draw_track == True:
+                self.img_if.set_targets_size_ratio(0.4)
+                self.img_if.set_targets_thickness_ratio(0.4)
+                self.img_if.set_targets_text_ratio(0.3)
+                self.img_if.set_overlay_target_degrees(True)
+            else:
+                self.img_if.remove_target('Track Goal')
+            self.img_if.set_targets_enable(draw_track)
+            self.draw_track = draw_track
 
+            if draw_track == True:
 
+                [x_deg,y_deg] = [0,0]                                
+                track_results = copy.deepcopy(self.track_results)
 
-
-                try:
-                        [x_deg,y_deg] = [0,0]
-                        track_results = copy.deepcopy(self.track_results)
-                        if track_results is not None:
-                            try:
-                                [x_deg,y_deg] = [track_results['azimuth_deg'],track_results['elevation_deg']]
-                            except Exception as e:
-                                self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
-
+                if track_results is None:      
+                    #self.msg_if.pub_info('No Track to Draw: ', throttle_s = 5)
+                    pass
+                else:      
+                    try:
+                        [x_deg,y_deg] = [track_results['azimuth_deg'],track_results['elevation_deg']]
                         self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
+                    except Exception as e:
+                        self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
 
-
-                        if draw_track == True:
-                            self.img_if.set_targets_size_ratio(0.4)
-                            self.img_if.set_targets_thickness_ratio(0.4)
-                            self.img_if.set_targets_text_ratio(0.3)
-                            self.img_if.set_overlay_target_degrees(True)
-                        else:
-                            self.img_if.remove_target('Track Goal')
-                        self.img_if.set_targets_enable(draw_track)
-                        self.draw_track = draw_track
-                except Exception as e:
-                    self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
-
-
+                    
+            #########################
             draw_crosshair = (self.show_goal_enabled == True)
-            try:
+            if self.draw_crosshair != draw_crosshair:
                 if draw_crosshair == True:
-                    [x_deg,y_deg] = copy.deepcopy(self.goal_error_degs)
-                    self.img_if.add_crosshair_degs(x_deg,y_deg,name = 'Move Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
-                if self.draw_crosshair != draw_crosshair:
-                    if draw_crosshair == True:
-                        self.img_if.set_crosshairs_size_ratio(0.4)
-                        self.img_if.set_crosshairs_thickness_ratio(0.4)
-                        self.img_if.set_crosshairs_text_ratio(0.3)
-                        self.img_if.set_overlay_crosshair_degrees(True)
-                    else:
-                        self.img_if.remove_crosshair('Move Goal')
-                    self.img_if.set_crosshairs_enable(draw_crosshair)
-                    self.draw_crosshair = draw_crosshair
-            except Exception as e:
-                self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
+                    self.img_if.set_crosshairs_size_ratio(0.4)
+                    self.img_if.set_crosshairs_thickness_ratio(0.4)
+                    self.img_if.set_crosshairs_text_ratio(0.3)
+                    self.img_if.set_overlay_crosshair_degrees(False)
+                else:
+                    self.img_if.remove_crosshair('Center')
+                    self.img_if.remove_crosshair('Move Goal')
+                self.img_if.set_crosshairs_enable(draw_crosshair)
+            self.draw_crosshair = draw_crosshair
+
+            if draw_crosshair == True:
+                [x_deg,y_deg] = copy.deepcopy(self.goal_error_degs)
+                try:
+                    self.img_if.add_crosshair_degs(0, 0,name = 'Center', color_rgb = (0,0,127))
+                    self.img_if.add_crosshair_degs(x_deg, y_deg,name = 'Move Goal', color_rgb = OVERLAY_CROSSHAIR_COLOR)
+                except Exception as e:
+                    self.msg_if.pub_info('Draw Crosshair Failed: ' + str([x_deg,y_deg]) + " with exception: " + str(e), throttle_s = 5)
 
 
-
+            #########################
             self.img_if.publish_cv2_img(cv2_img,
                                 encoding = "bgr8",
                                 timestamp = timestamp,
@@ -559,15 +559,9 @@ class AutoTurretImgPub:
 
 
     #############################
-    # Targets Results
-    def convert_results_pub_msg2dict(self, results_msg):
-        results_dict = nepi_sdk.convert_msg2dict(results_msg)
-        return results_dict
 
 
-    OVERLAY_CROSSHAIR_COLOR = (0,255, 0)
-    OVERLAY_TARGETS_COLOR = (255, 255, 255)
-    OVERLAY_TRACK_COLOR = (255, 0, 0)
+
 
     def process_targets_image(self, cv2_img, img_status_dict, controls_dict, results_dict):
         ##################
@@ -590,11 +584,11 @@ class AutoTurretImgPub:
         if controls_dict is None:
             controls_dict = dict()
         overlay_color = controls_dict.get('overlay_color',(0,0,127))
-        overlay_font = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT)
-        overlay_font_color = controls_dict.get('overlay_color',nepi_img.OVERLAY_FONT_COLOR)
-        overlay_line_type = controls_dict.get('overlay_color',nepi_img.OVERLAY_LINE_TYPE)
-
-
+        overlay_font = controls_dict.get('overlay_font',nepi_img.OVERLAY_FONT)
+        overlay_font_color = controls_dict.get('overlay_font_color',nepi_img.OVERLAY_FONT_COLOR)
+        overlay_line_type = controls_dict.get('overlay_line_color',nepi_img.OVERLAY_LINE_TYPE)
+        overlay_labels =  controls_dict.get('overlay_labels',True)
+        overlay_range_bearing =  controls_dict.get('overlay_range_bearing',False)
         ##################
         # Get Results Data
         if results_dict is None:
@@ -610,7 +604,7 @@ class AutoTurretImgPub:
                 # Overlay text data on OpenCV image
                 font = overlay_font
                 scale = 1.5e-3 - 0.1e-3 * math.ceil(max([img_height, img_width])/700)
-                fontScale, fontThickness  = nepi_img.optimal_font_dims(cv2_img,font_scale = scale, thickness_scale = scale, scale_ratio = 0.5) 
+                fontScale, fontThickness  = nepi_img.get_optimal_font_dims(cv2_img,font_scale = scale, thickness_scale = scale, scale_ratio = 0.5) 
                 fontColor = (255, 255, 255)
                 fontColorBk = (0,0,0)
                 lineType = overlay_line_type
@@ -656,9 +650,6 @@ class AutoTurretImgPub:
 
 
                     ## Overlay Text
-                    overlay_labels =  self.overlay_labels
-                    overlay_range_bearing =  self.overlay_range_bearing
-
                     overlay_text = ""
 
                     if overlay_labels:
@@ -668,14 +659,15 @@ class AutoTurretImgPub:
                         if target_dict['range_m'] != -999 and target_dict['range_m'] != '':
                             rb_text = rb_text + str(round(target_dict['range_m'],1)) + 'm :'
                         if target_dict['azimuth_deg'] != -999 and target_dict['elevation_deg'] != -999:
-                            rb_text = rb_text + str(round(target_dict['azimuth_deg'],1)) + 'deg '
-                            rb_text = rb_text + str(round(target_dict['elevation_deg'],1)) + 'deg '
+                            rb_text = rb_text + str(round(target_dict['azimuth_deg'],0)) + 'deg '
+                            rb_text = rb_text + str(round(target_dict['elevation_deg'],0)) + 'deg '
                         if len(rb_text) > 0:
                             overlay_text = overlay_text + rb_text
 
 
 
-                    if len(overlay_text) > 0:
+                    if overlay_text != "":
+
                         text2overlay=overlay_text
                         text_size = cv2.getTextSize(text2overlay, 
                             font, 
@@ -711,22 +703,31 @@ class AutoTurretImgPub:
                         # Start name overlays    
                         x_start = int(img_width * 0.05)
                         y_start = int(img_height * 0.05)
-            except:
-                pass
+            except Exception as e:
+                self.msg_if.pub_warn("Failed to apply overlay label text: " + str(e), throttle_s = 5)
 
         return cv2_img_results
 
 
-    def targetsResultsCb(self, results_msg, args):
-        source_topic = args
-        if source_topic != self.selected_image_topic or nepi_sdk.is_shutdown() == True:
+    def targetsResultsCb(self, results_msg):
+        source_topic = results_msg.data_header.source_topic
+        #self.msg_if.pub_info('Got Targets from source : ' + str([source_topic,self.selected_image_topic]), throttle_s = 5)
+        if source_topic != self.selected_image_topic and not nepi_sdk.is_shutdown():
             return
-        self.targets_dict = self.convert_results_pub_msg2dict(results_msg)
+        
+        self.targets_results = nepi_sdk.convert_msg2dict(results_msg)
         self.targets_time = nepi_utils.get_time()
+        #self.msg_if.pub_info('Got Targets : ' + str(self.targets_results.keys()), throttle_s = 5)
 
-    def trackResultsCb(self, msg):
-        self.track_results = nepi_sdk.convert_msg2dict(msg)
+    def trackResultsCb(self, results_msg):
+        source_topic = results_msg.data_header.source_topic
+        #self.msg_if.pub_info('Got Track from source : ' + str([source_topic,self.selected_image_topic]), throttle_s = 5)
+        if source_topic != self.selected_image_topic and not nepi_sdk.is_shutdown():
+            return
+
+        self.track_results = nepi_sdk.convert_msg2dict(results_msg)
         self.track_results_time = nepi_utils.get_time()
+        #self.msg_if.pub_info('Got Track : ' + str(self.track_results.keys()), throttle_s = 5)
 
     def statusCb(self, msg):
         self.last_status_time = nepi_utils.get_time()
@@ -747,6 +748,7 @@ class AutoTurretImgPub:
         self.show_track_enabled = msg.show_track_enabled
         self.show_goal_enabled = msg.show_goal_enabled
         self.goal_error_degs = [msg.auto_pan_error_deg, msg.auto_tilt_error_deg]
+        self.image_stab_enabled = msg.image_stab_enabled
 
 
 

@@ -25,7 +25,7 @@ nepi_interfaces/ImageStatus image_status_msg
 
 string selected_targets_topic
 bool targets_connected
-nepi_interfaces/TargetingStatus targets_status_msg
+nepi_interfaces/TargetsStatus targets_status_msg
 
 string selected_navpose_topic
 bool navpose_connected
@@ -81,4 +81,5 @@ bool show_full_screen
 bool show_targets_enabled
 bool show_track_enabled
 bool show_goal_enabled
+bool image_stab_enabled
 

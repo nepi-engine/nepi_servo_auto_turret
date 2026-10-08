@@ -24,7 +24,7 @@ from std_msgs.msg import Empty, String, Bool, Float32
 from nepi_interfaces.msg import DevicePTXStatus
 from nepi_interfaces.msg import ImageStatus
 from nepi_interfaces.msg import NavPoseStatus
-from nepi_interfaces.msg import TargetingStatus
+from nepi_interfaces.msg import TargetsStatus
 from nepi_interfaces.msg import NavPose
 
 from nepi_interfaces.msg import FloatArray, StringArray
@@ -37,17 +37,18 @@ from nepi_sdk import nepi_utils
 from nepi_sdk import nepi_controls
 from nepi_sdk import nepi_data
 from nepi_sdk import nepi_process_track
+from nepi_sdk import nepi_nav
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
 from nepi_api.system_if import SaveDataIF
 
-from nepi_api.process_if_track import ProcessTrackIF
+from nepi_api.process_if import ProcessIF
 
 from nepi_api.connect_device_if_ptx import ConnectPTXDeviceIF
 from nepi_api.connect_data_if import ConnectImageIF
 from nepi_api.connect_data_if import ConnectNavPoseIF
-from nepi_api.connect_targets_if import ConnectTargetsIF
+from nepi_api.connect_process_if_targets import ConnectProcessIFTargets
 
 
 #########################################
@@ -65,12 +66,10 @@ UPDATER_RATE_HZ = 1.0
 
 IMG_PUB_NODE_SUFFIX = '_img_pub'
 IMG_PUB_NODE_FILE = 'auto_turret_app_img_pub_node.py'
-IMG_PUB_DATA_PRODUCT = 'process_image'
+IMG_PUB_DATA_PRODUCT = 'auto_image'
 
 PKG_NAME = 'nepi_app_auto_turret'
 
-# Track.target is a Target msg, but ConnectTargetsIF delivers targets as dicts,
-# so the selected one is rebuilt through nepi_sdk.convert_dict2msg.
 TARGET_MSG_TYPE = 'nepi_interfaces/Target'
 
 
@@ -83,6 +82,9 @@ class NepiAutoTurretApp(object):
 
   #######################
   ### Node Initialization
+
+  MIN_MAX_PROCESS_RATES = [0,10]
+  DEFAULT_PROCESS_RATE = 10
 
   DEFAULT_NODE_NAME = "app_auto_turret"  # Can be overwritten by launch command
 
@@ -167,6 +169,7 @@ class NepiAutoTurretApp(object):
   show_targets_enabled = False
   show_track_enabled = False
   show_goal_enabled = False
+  image_stab_enabled = False
 
 
   # Child overlay image publisher node
@@ -294,6 +297,10 @@ class NepiAutoTurretApp(object):
         'show_goal_enabled': {
             'namespace': self.node_namespace,
             'factory_val': self.show_goal_enabled
+        },
+        'image_stab_enabled': {
+            'namespace': self.node_namespace,
+            'factory_val': self.image_stab_enabled
         }
     }
 
@@ -306,13 +313,20 @@ class NepiAutoTurretApp(object):
             'qsize': 1,
             'latch': True
         },
-        # 'track_pub': {
-        #     'namespace': self.node_namespace,
-        #     'topic': 'track',
-        #     'msg': Track,
-        #     'qsize': 1,
-        #     'latch': False
-        # }
+        'set_live_adjust_enable': {
+            'namespace': self.node_namespace + '/' + IMG_PUB_DATA_PRODUCT,
+            'topic': 'set_live_adjust_enable',
+            'msg': Bool,
+            'qsize': 1,
+            'latch': False
+        },
+        'set_live_adjust_rotate_deg': {
+            'namespace': self.node_namespace + '/' + IMG_PUB_DATA_PRODUCT,
+            'topic': 'set_live_adjust_rotate_deg',
+            'msg': Float32,
+            'qsize': 1,
+            'latch': False
+        }
     }
 
     # Subscribers Config Dict ####################
@@ -507,6 +521,14 @@ class NepiAutoTurretApp(object):
             'qsize': 1,
             'callback': self.setShowCrosshairCb,
             'callback_args': ()
+        },
+        'set_image_stab_enable': {
+            'namespace': self.node_namespace,
+            'topic': 'set_image_stab_enable',
+            'msg': Bool,
+            'qsize': 1,
+            'callback': self.setImageStabEnableCb,
+            'callback_args': ()
         }
     }
 
@@ -573,10 +595,10 @@ class NepiAutoTurretApp(object):
                                     # node_if = self.node_if
                                     )
 
-    self.targets_connect_if = ConnectTargetsIF(
+    self.targets_connect_if = ConnectProcessIFTargets(
+                                    connect_name = 'targets_connect',
                                     auto_select_enabled = self.auto_select_enabled,
-                                    statusCb = self.targetsStatusCb,
-                                    dataCB = self.targetsCb,
+                                    results_callback = self.targetsCb,
                                     show_selector = True,
                                     show_controls = False,
                                     show_data = False,
@@ -637,13 +659,59 @@ class NepiAutoTurretApp(object):
     #             node_if = self.node_if
     # )  
 
-    self.track_process_if = ProcessTrackIF(
+
+    self.process_callback_dict = dict(
+        process_update_callback = None,
+        settings_updated_callback = None,
+        controls_updated_callback = None,
+    )
+
+
+    self.process_config_dict = dict(
+        has_sources = False,
+        multi_source_enabled = False,
+        has_auto_select = True,
+        auto_select_enabled = True,
+        selected_sources = [],
+        
+        has_enable = False,
+
+        has_process_rate = False,
+        min_max_process_rates = self.MIN_MAX_PROCESS_RATES,
+        default_process_rate = self.DEFAULT_PROCESS_RATE,
+
+        has_image_rate = False,
+        min_max_image_rates = [1,10],
+        default_image_rate = 10,
+        has_use_last_image = False,
+
+        has_process_pub = True,
+        has_process_enable = True,
+        has_process_reload = False,
+
+        has_results_pub = True,
+
+        has_save_data = True,
+        has_config = True,
+
+        has_image_pub = True,
+
+        has_status_pub = True,
+        throttle_status_sec = 0.1
+    )
+
+    self.track_process_if = ProcessIF(
                 process_name = self.track_process_name,
-                log_name = None,
-                log_name_list = [],
+                process_group = self.track_process_name,
+                process_description = self.track_process_name,
+                process_module = self.track_process_module,
+                callback_dict = self.process_callback_dict, 
+                config_dict = self.process_config_dict,
                 msg_if = self.msg_if,
                 node_if = self.node_if
-    )  
+              )  
+
+
 
     # self.stab_process_if = ProcessIF(process_name = self.stab_process_name,
     #             process_group = self.node_name,
@@ -781,7 +849,7 @@ class NepiAutoTurretApp(object):
     self.last_targets_time = nepi_utils.get_time()
     self.targets_lock.acquire()
     try:
-      self.targets_dict_list = targets_dict['data']['targets']
+      self.targets_dict_list = targets_dict['targets']
     except Exception as e:
       self.msg_if.pub_warn("Failed to convert Targets Dict : " + str(targets_dict) + " : " + str(e), throttle_s = 10)
     
@@ -1054,6 +1122,13 @@ class NepiAutoTurretApp(object):
     self.setParam('show_goal_enabled', enabled)
     self.publish_status()
 
+  def setImageStabEnableCb(self, msg):
+    enabled = msg.data
+    self.msg_if.pub_info("Setting image stab to: " + str(enabled))
+    self.image_stab_enabled = enabled
+    self.setParam('image_stab_enabled', enabled)
+    self.publish_status()
+
   ###############################
   # Derived State
   ###############################
@@ -1123,7 +1198,7 @@ class NepiAutoTurretApp(object):
       self.show_targets_enabled = self.node_if.get_param('show_targets_enabled')
       self.show_track_enabled = self.node_if.get_param('show_track_enabled')
       self.show_goal_enabled = self.node_if.get_param('show_goal_enabled')
-
+      self.image_stab_enabled = self.node_if.get_param('show_goal_enabled')
 
       if self.auto_process_if is not None:
         self.auto_process_if.init()
@@ -1189,10 +1264,16 @@ class NepiAutoTurretApp(object):
     if self.image_connect_if is not None:
           source_image_topic = self.image_connect_if.get_namespace()
 
-    navpose_dict = nepi_sdk.convert_msg2dict(NavPose())
+    navpose_dict = None
     if self.navpose_connect_if is not None:
           navpose_dict = self.navpose_connect_if.get_navpose_dict()
-
+          #self.msg_if.pub_warn("Got navpose dict: " + str(navpose_dict), throttle_s = 5)
+    else:
+      self.msg_if.pub_warn("NavPose IF Connect is None", throttle_s = 5)
+    if navpose_dict is None:
+      navpose_msg = NavPose()
+      navpose_dict = nepi_nav.convert_navpose_msg2dict(navpose_msg)
+      #self.msg_if.pub_warn("Create Blank navpose dict: " + str(navpose_dict), throttle_s = 5)
 
     self.targets_lock.acquire()
     targets_dict_list = copy.deepcopy(self.targets_dict_list)
@@ -1278,7 +1359,7 @@ class NepiAutoTurretApp(object):
         status_dict = pantilt_connect_if.get_status_dict()
         #self.msg_if.pub_warn("Got pantilt_status_dict: " + str(pantilt_status_dict), throttle_s = 10)
         if status_dict is not None:
-          pantilt_status_dict
+          pantilt_status_dict = status_dict
 
 
       except Exception as e:
@@ -1311,20 +1392,49 @@ class NepiAutoTurretApp(object):
     #####################
     # Apply Process Outputs
     #####################
-    if pan_manual == True:
-      auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
+
+    if navpose_dict is None:
+        navpose_dict = nepi_nav.BLANK_NAVPOSE_DICT
+    if navpose_dict['has_pan_tilt'] == True:
+        if navpose_dict['has_heading'] == True:
+            heading_deg = navpose_dict.get('pan_tilt_heading_deg',-999)
+        else:
+            heading_deg = navpose_dict.get('pan_tilt_yaw_deg',-999)
+        pitch_deg = navpose_dict.get('pan_tilt_pitch_deg',-999) 
+        roll_deg = navpose_dict.get('pan_tilt_roll_deg',-999)
     else:
-      auto_pan_error_deg = 0
+        if navpose_dict['has_heading'] == True:
+            heading_deg = navpose_dict.get('heading_deg',-999)
+        else:
+            heading_deg = navpose_dict.get('yaw_deg',-999)
+        pitch_deg = navpose_dict.get('pitch_deg',-999) 
+        roll_deg = navpose_dict.get('roll_deg',-999)
+
+    if int(heading_deg) == -999:
+        heading_deg = 0
+    
+    if int(pitch_deg) == -999:
+        pitch_deg = 0
+      
+    if int(roll_deg) == -999:
+        roll_deg = 0
+
+
+    if self.tracking_enabled == True and track_process_results is not None:
+      track_heading_deg = track_process_results['heading_deg']
+      track_pitch_deg = track_process_results['pitch_deg']
+      track_roll_deg = track_process_results['roll_deg']
+
+      auto_pan_error_deg = -1 * (heading_deg - track_heading_deg)
+      auto_tilt_error_deg = -1 * (pitch_deg - track_pitch_deg)
+    else:
+      auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
+      auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
 
     auto_results['auto_pan_error_deg'] = auto_pan_error_deg
-
-    if tilt_manual == True:
-      auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
-    else:
-      auto_tilt_error_deg = 0
-
     auto_results['auto_tilt_error_deg'] = auto_tilt_error_deg
 
+    # self.msg_if.pub_warn("Got auto pt errors: " + str([auto_pan_error_deg,auto_tilt_error_deg]), throttle_s = 5)
     #####################
     # Update Auto Pan Status Values
 
@@ -1339,8 +1449,17 @@ class NepiAutoTurretApp(object):
       pass
 
 
+    #############################
+
+    # Apply Image Stabilization if Required
 
 
+    if self.image_stab_enabled == True:
+        self.node_if.publish_pub('set_live_adjust_enable', True)
+        self.node_if.publish_pub('set_live_adjust_rotate_deg', roll_deg)
+    else:
+        self.node_if.publish_pub('set_live_adjust_enable', False)
+        self.node_if.publish_pub('set_live_adjust_rotate_deg',0)
 
 
     
@@ -1419,7 +1538,7 @@ class NepiAutoTurretApp(object):
       targets_status_msg = self.targets_connect_if.get_status_msg()
     if targets_status_msg is None:
       self.status_msg.selected_targets_topic = "None"
-      targets_status_msg = TargetingStatus()
+      targets_status_msg = TargetsStatus()
     self.status_msg.targets_connected = self.targets_connected
     self.status_msg.targets_status_msg = targets_status_msg
 
@@ -1467,7 +1586,7 @@ class NepiAutoTurretApp(object):
     self.status_msg.show_targets_enabled = self.show_targets_enabled
     self.status_msg.show_track_enabled = self.show_track_enabled
     self.status_msg.show_goal_enabled = self.show_goal_enabled
-
+    self.status_msg.image_stab_enabled = self.image_stab_enabled
 
     if last_status_msg != self.status_msg and check == True:
       self.node_if.publish_pub('status_pub', self.status_msg)
