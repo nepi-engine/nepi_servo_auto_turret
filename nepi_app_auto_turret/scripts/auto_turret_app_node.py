@@ -19,6 +19,15 @@
 import copy
 import threading
 
+from nepi_sdk import nepi_sdk
+from nepi_sdk import nepi_utils
+from nepi_sdk import nepi_controls
+from nepi_sdk import nepi_data
+from nepi_sdk import nepi_process_track
+from nepi_sdk import nepi_nav
+
+from nepi_sdk import nepi_process_auto_turret as auto_process
+
 from std_msgs.msg import Empty, String, Bool, Float32
 
 from nepi_interfaces.msg import DevicePTXStatus
@@ -29,15 +38,11 @@ from nepi_interfaces.msg import NavPose
 
 from nepi_interfaces.msg import FloatArray, StringArray
 
-from nepi_app_auto_turret.msg import AutoTurretStatus
+from nepi_app_auto_turret.msg import AutoTurretStatus, AutoTurretAxis
 
 
-from nepi_sdk import nepi_sdk
-from nepi_sdk import nepi_utils
-from nepi_sdk import nepi_controls
-from nepi_sdk import nepi_data
-from nepi_sdk import nepi_process_track
-from nepi_sdk import nepi_nav
+
+
 
 from nepi_api.messages_if import MsgIF
 from nepi_api.node_if import NodeClassIF
@@ -114,20 +119,17 @@ class NepiAutoTurretApp(object):
   targets_connected = False
   navpose_connected = False
 
+
+  pan_axis_dict = auto_process.get_blank_axis_dict()
+  tilt_axis_dict = auto_process.get_blank_axis_dict()
+
+  pan_update_dict = auto_process.get_blank_update_dict()
+  tilt_update_dict = auto_process.get_blank_update_dict()
+
+
   # Pan tilt state
   pt_position = None
-  pan_goto = UNSET_VALUE
-  tilt_goto = UNSET_VALUE
-  speed_ratio = 0.5
-  pan_speed_ratio = 0.5
-  tilt_speed_ratio = 0.5
-  last_speed_ratios_pushed = None
 
-  pan_control_manaul_enabled = True
-  tilt_control_manaul_enabled = True
-
-  pan_control_auto_enabled = False
-  tilt_control_auto_enabled = False
 
   # Auto modes. No control loop drives these yet; see setScanningEnableCb.
 
@@ -138,31 +140,28 @@ class NepiAutoTurretApp(object):
   min_max_image_pub_rates = [1,20]
   max_image_pub_rate_hz = 10.0
 
-  auto_process_name = 'auto'
-  auto_process_namespace = ''
-  auto_process_if = None
-  auto_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  auto_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
+  auto_process_name = 'auto'
+  auto_process_module = auto_process
+  auto_process_if = None
+  
   scanning_enabled = False
   scan_process_name = 'scan'
-  scan_process_namespace = ''
+  #scan_process_module = nepi_process_scan
   scan_process_if = None
-  scan_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  scan_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
 
 
+  tracking_enabled = False
   track_process_name = 'track'
   track_process_module = nepi_process_track
   track_process_if = None
-  tracking_enabled = False
+  
 
   stabilize_enabled = False
   stab_process_name = 'stab'
-  stab_process_namespace = ''
+  #stab_process_module = nepi_process_stab
   stab_process_if = None
-  stab_process_controls = copy.deepcopy(nepi_controls.EXAMPLE_INIT_DICT)
-  stab_results = copy.deepcopy(nepi_data.EXAMPLE_INIT_DICT)
+  
 
   # Overlay controls, consumed by the image publisher node off the status msg
   show_full_screen = False
@@ -257,18 +256,6 @@ class NepiAutoTurretApp(object):
         'stabilize_enabled': {
             'namespace': self.node_namespace,
             'factory_val': self.stabilize_enabled
-        },
-        'speed_ratio': {
-            'namespace': self.node_namespace,
-            'factory_val': self.speed_ratio
-        },
-        'pan_speed_ratio': {
-            'namespace': self.node_namespace,
-            'factory_val': self.pan_speed_ratio
-        },
-        'tilt_speed_ratio': {
-            'namespace': self.node_namespace,
-            'factory_val': self.tilt_speed_ratio
         },
         'auto_select_enabled': {
             'namespace': self.node_namespace,
@@ -573,7 +560,7 @@ class NepiAutoTurretApp(object):
     # their registry keys cannot collide with this node's or with each other's.
     self.pantilt_connect_if = ConnectPTXDeviceIF(
                                     auto_select_enabled = self.auto_select_enabled,
-                                    panTiltCb = self.panTiltCb,
+                                    panTiltCb = None,
                                     stopPanCb = self.stopPanCb,
                                     stopTiltCb = self.stopTiltCb,
                                     show_selector = True,
@@ -630,20 +617,65 @@ class NepiAutoTurretApp(object):
       if connect_if.wait_for_ready(timeout = 10) != True:
         self.msg_if.pub_warn("Connect IF did not become ready: " + str(name))
 
-    # ##############################
-    # self.auto_process_if = ProcessIF(process_name = self.auto_process_name,
-    #             process_group = self.node_name,
-    #             process_description = self.auto_process_name,
-    #             process_controls_dict = self.auto_process_controls,
-    #             results_dict = self.auto_data,
-    #             results_msg = None,
-    #             show_controls = True,
-    #             show_data = True,
-    #             log_name = None,
-    #             log_name_list = [],
-    #             msg_if = self.msg_if,
-    #             node_if = self.node_if
-    # )  
+    ###############################
+    # Create Process IFs
+
+    self.auto_callback_dict = dict(
+        process_update_callback = None,
+        settings_updated_callback = None,
+        controls_updated_callback = None,
+    )
+
+
+    self.auto_config_dict = dict(
+        has_sources = False,
+        multi_source_enabled = False,
+        has_auto_select = False,
+        auto_select_enabled = True,
+        selected_sources = [],
+        
+        has_enable = False,
+
+        has_process_rate = False,
+        min_max_process_rates = self.MIN_MAX_PROCESS_RATES,
+        default_process_rate = self.DEFAULT_PROCESS_RATE,
+
+        has_image_rate = False,
+        min_max_image_rates = [1,10],
+        default_image_rate = 10,
+        has_use_last_image = False,
+
+        has_process_pub = True,
+        has_process_enable = True,
+        has_process_reload = False,
+
+        has_results_pub = True,
+
+        has_save_data = True,
+        has_config = True,
+
+        has_image_pub = True,
+
+        has_status_pub = True,
+        throttle_status_sec = 0.1
+    )
+
+    self.auto_if_dict = dict(
+        pantilt_connect_if = self.pantilt_connect_if,
+    )
+
+
+    self.auto_process_if = ProcessIF(
+                process_name = self.auto_process_name,
+                process_group = self.auto_process_name,
+                process_description = self.auto_process_name,
+                process_module = self.auto_process_module,
+                callback_dict = self.auto_callback_dict, 
+                config_dict = self.auto_config_dict,
+                if_dict = self.auto_if_dict,
+                msg_if = self.msg_if,
+                node_if = self.node_if
+              )  
 
     # self.scan_process_if = ProcessIF(process_name = self.scan_process_name,
     #             process_group = self.node_name,
@@ -660,17 +692,17 @@ class NepiAutoTurretApp(object):
     # )  
 
 
-    self.process_callback_dict = dict(
+    self.track_callback_dict = dict(
         process_update_callback = None,
         settings_updated_callback = None,
         controls_updated_callback = None,
     )
 
 
-    self.process_config_dict = dict(
+    self.track_config_dict = dict(
         has_sources = False,
         multi_source_enabled = False,
-        has_auto_select = True,
+        has_auto_select = False,
         auto_select_enabled = True,
         selected_sources = [],
         
@@ -705,8 +737,8 @@ class NepiAutoTurretApp(object):
                 process_group = self.track_process_name,
                 process_description = self.track_process_name,
                 process_module = self.track_process_module,
-                callback_dict = self.process_callback_dict, 
-                config_dict = self.process_config_dict,
+                callback_dict = self.track_callback_dict, 
+                config_dict = self.track_config_dict,
                 msg_if = self.msg_if,
                 node_if = self.node_if
               )  
@@ -819,28 +851,16 @@ class NepiAutoTurretApp(object):
       return 'None'
     return topic
 
-  # def pushSpeedRatios(self):
-  #   # A newly connected device knows nothing of the ratios this node restored
-  #   # from config, so push them once per connection rather than every cycle.
-  #   if self.pantilt_connected == False:
-  #     self.last_speed_ratios_pushed = None
-  #     return
-  #   ratios = [self.speed_ratio, self.pan_speed_ratio, self.tilt_speed_ratio]
-  #   if ratios == self.last_speed_ratios_pushed:
-  #     return
-  #   self.pantilt_connect_if.set_speed_ratio(self.speed_ratio)
-  #   self.pantilt_connect_if.set_pan_speed_ratio(self.pan_speed_ratio)
-  #   self.pantilt_connect_if.set_tilt_speed_ratio(self.tilt_speed_ratio)
-  #   self.last_speed_ratios_pushed = ratios
+
 
   def panTiltCb(self, pan_deg, tilt_deg):
     self.pt_position = [pan_deg, tilt_deg]
 
   def stopPanCb(self):
-    self.pan_goto = UNSET_VALUE
+    self.pan_update_dict['stop'] = True
 
   def stopTiltCb(self):
-    self.tilt_goto = UNSET_VALUE
+    self.tilt_update_dict['stop'] = True
 
   def targetsCb(self, targets_dict):    
 
@@ -908,7 +928,7 @@ class NepiAutoTurretApp(object):
     self.publish_status()
 
   ###############################
-  # Pan Tilt Control Callbacks
+  # Pan Tilt Control Update Callbacks
   ###############################
 
   def setPanPosDegCb(self, msg):
@@ -918,13 +938,11 @@ class NepiAutoTurretApp(object):
     if self.pantilt_connected == False:
       self.msg_if.pub_warn("No pan tilt device connected; ignoring pan position command")
       return
-    if self.getPanControlDisabled() == True:
+    if self.pan_axis_dict['pos_disabled'] == False:
       self.msg_if.pub_warn("An auto mode owns the pan axis; ignoring pan position command")
       return
-    self.msg_if.pub_info("Sending pan position command: " + str(pos_deg))
-    self.pan_goto = pos_deg
-    self.pantilt_connect_if.goto_to_pan_position(pos_deg)
-    self.publish_status()
+    self.pan_update_dict['pos_deg'] = pos_deg
+
 
   def setTiltPosDegCb(self, msg):
     self.setTiltPosDeg(msg.data)
@@ -933,13 +951,10 @@ class NepiAutoTurretApp(object):
     if self.pantilt_connected == False:
       self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt position command")
       return
-    if self.getTiltControlDisabled() == True:
+    if self.tilt__axis_dict['pos_disabled'] == False:
       self.msg_if.pub_warn("An auto mode owns the tilt axis; ignoring tilt position command")
       return
-    self.msg_if.pub_info("Sending tilt position command: " + str(pos_deg))
-    self.tilt_goto = pos_deg
-    self.pantilt_connect_if.goto_to_tilt_position(pos_deg)
-    self.publish_status()
+    self.tilt_update_dict['pos_deg'] = pos_deg
 
   def setPanPosRatioCb(self, msg):
     self.setPanPosRatio(msg.data)
@@ -951,15 +966,10 @@ class NepiAutoTurretApp(object):
     if self.pantilt_connected == False:
       self.msg_if.pub_warn("No pan tilt device connected; ignoring pan ratio command")
       return
-    if self.getPanControlDisabled() == True:
+    if self.pan_axis_dict['pos_disabled']== False:
       self.msg_if.pub_warn("An auto mode owns the pan axis; ignoring pan ratio command")
       return
-    self.msg_if.pub_info("Sending pan ratio command: " + str(ratio))
-    # pan_goto stays in degrees and is left alone here. Converting the ratio
-    # would mean duplicating the device's soft stop mapping in this node, and
-    # the acted-on goal comes back in pantilt_status_msg.pan_goal_deg anyway.
-    self.pantilt_connect_if.goto_pan_ratio(ratio)
-    self.publish_status()
+    self.pan_update_dict['pos_ratio'] =  ratio
 
   def setTiltPosRatioCb(self, msg):
     self.setTiltPosRatio(msg.data)
@@ -971,47 +981,51 @@ class NepiAutoTurretApp(object):
     if self.pantilt_connected == False:
       self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt ratio command")
       return
-    if self.getTiltControlDisabled() == True:
+    if self.tilt_axis_dict['pos_disabled'] == False:
       self.msg_if.pub_warn("An auto mode owns the tilt axis; ignoring tilt ratio command")
       return
-    self.msg_if.pub_info("Sending tilt ratio command: " + str(ratio))
-    self.pantilt_connect_if.goto_tilt_ratio(ratio)
-    self.publish_status()
+    self.tilt_update_dict['pos_ratio'] =  ratio
 
   def setSpeedRatioCb(self, msg):
     ratio = self.clampRatio(msg.data)
     if ratio is None:
       return
-    self.speed_ratio = ratio
-    if self.pantilt_connected == True:
-      self.pantilt_connect_if.set_speed_ratio(ratio)
-    self.setParam('speed_ratio', ratio)
-    self.publish_status()
+    if self.pantilt_connected == False:
+      self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt ratio command")
+      return
+    if self.pan_axis_dict['speed_disabled'] == False or self.tilt_axis_dict['speed_disabled'] == False:
+      self.msg_if.pub_warn("An auto mode owns the speed; ignoring tilt ratio command")
+      return    
+    self.pan_update_dict['speed_ratio'] =  ratio
+    self.tilt_update_dict['speed_ratio'] =  ratio
 
   def setPanSpeedRatioCb(self, msg):
     ratio = self.clampRatio(msg.data)
     if ratio is None:
       return
-    self.pan_speed_ratio = ratio
-    if self.pantilt_connected == True:
-      self.pantilt_connect_if.set_pan_speed_ratio(ratio)
-    self.setParam('pan_speed_ratio', ratio)
-    self.publish_status()
+    if self.pantilt_connected == False:
+      self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt ratio command")
+      return
+    if self.pan_axis_dict['speed_disabled'] == False:
+      self.msg_if.pub_warn("An auto mode owns the pan speed; ignoring tilt ratio command")
+      return  
+    self.tilt_update_dict['speed_ratio'] =  ratio
 
   def setTiltSpeedRatioCb(self, msg):
     ratio = self.clampRatio(msg.data)
     if ratio is None:
       return
-    self.tilt_speed_ratio = ratio
-    if self.pantilt_connected == True:
-      self.pantilt_connect_if.set_tilt_speed_ratio(ratio)
-    self.setParam('tilt_speed_ratio', ratio)
-    self.publish_status()
+    if self.pantilt_connected == False:
+      self.msg_if.pub_warn("No pan tilt device connected; ignoring tilt ratio command")
+      return
+    if self.tilt_axis_dict['speed_disabled'] == False:
+      self.msg_if.pub_warn("An auto mode owns the tilt speed; ignoring tilt ratio command")
+      return    
+    self.tilt_update_dict['speed_ratio'] =  ratio
+
 
   def clampRatio(self, ratio):
-    if ratio < 0.0 or ratio > 1.0:
-      self.msg_if.pub_warn("Ignoring out of range ratio: " + str(ratio))
-      return None
+    ratio = nepi_utils.check_ratio(ratio)
     return ratio
 
   def ptStopCb(self, msg):
@@ -1019,10 +1033,11 @@ class NepiAutoTurretApp(object):
       self.msg_if.pub_warn("No pan tilt device connected; ignoring stop command")
       return
     self.msg_if.pub_info("Stopping pan tilt motion")
-    self.pantilt_connect_if.stop_moving()
-    self.pan_goto = UNSET_VALUE
-    self.tilt_goto = UNSET_VALUE
-    self.publish_status()
+    self.stabilize_enabled = False
+    self.tracking_enabled = False
+    self.scanning_enabled = False
+    self.pan_update_dict['stop'] = True
+    self.tilt_update_dict['stop'] = True
 
   def panHomeCb(self, msg):
     self.goHome('pan')
@@ -1039,14 +1054,9 @@ class NepiAutoTurretApp(object):
       self.msg_if.pub_warn("Connected pan tilt device does not support homing")
       return
     if axis == 'pan':
-      self.msg_if.pub_info("Sending pan home command")
-      self.pan_goto = status_msg.pan_home_pos_deg
-      self.pantilt_connect_if.goto_to_pan_position(status_msg.pan_home_pos_deg)
+      self.pan_update_dict['home_deg'] = status_msg.pan_home_pos_deg
     else:
-      self.msg_if.pub_info("Sending tilt home command")
-      self.tilt_goto = status_msg.tilt_home_pos_deg
-      self.pantilt_connect_if.goto_to_tilt_position(status_msg.tilt_home_pos_deg)
-    self.publish_status()
+      self.tilt_update_dict['home_deg'] = status_msg.pan_home_pos_deg
 
   ###############################
   # Auto Mode Callbacks
@@ -1056,7 +1066,7 @@ class NepiAutoTurretApp(object):
   # drive lives in nepi_auto_pt.pt_auto_2, but nothing in this node builds the
   # auto_data_dict it needs (navpose feed, mount transforms, per-axis servo
   # state, the control loop), so an enabled mode moves no axis. The toggle
-  # still round-trips and still gates pan_control_disabled / tilt_control_disabled,
+  # still round-trips and still gates pan_pos_disabled / tilt_pos_disabled,
   # which is what the RUI reads.
 
   def setScanningEnableCb(self, msg):
@@ -1066,8 +1076,11 @@ class NepiAutoTurretApp(object):
       return
     self.msg_if.pub_info("Setting scanning enable to: " + str(enabled))
     self.scanning_enabled = enabled
-    self.setParam('scanning_enabled', enabled)
+    self.pan_update_dict['scanning'] = enabled
+    self.tilt_update_dict['scanning'] = enabled
     self.publish_status()
+    self.setParam('scanning_enabled', enabled)
+    
 
   def setTrackingEnableCb(self, msg):
     enabled = msg.data
@@ -1076,8 +1089,11 @@ class NepiAutoTurretApp(object):
       return
     self.msg_if.pub_info("Setting tracking enable to: " + str(enabled))
     self.tracking_enabled = enabled
-    self.setParam('tracking_enabled', enabled)
+    self.pan_update_dict['tracking'] = enabled
+    self.tilt_update_dict['tracking'] = enabled
     self.publish_status()
+    self.setParam('tracking_enabled', enabled)
+    
 
   def setStabilizeEnableCb(self, msg):
     enabled = msg.data
@@ -1086,8 +1102,11 @@ class NepiAutoTurretApp(object):
       return
     self.msg_if.pub_info("Setting stabilize enable to: " + str(enabled))
     self.stabilize_enabled = enabled
-    self.setParam('stabilize_enabled', enabled)
+    self.pan_update_dict['stabilize'] = enabled
+    self.tilt_update_dict['stabilize'] = enabled
     self.publish_status()
+    self.setParam('stabilize_enabled', enabled)
+
 
   ###############################
   # Overlay Control Callbacks
@@ -1098,8 +1117,9 @@ class NepiAutoTurretApp(object):
     enabled = msg.data
     self.msg_if.pub_info("Setting full screen to: " + str(enabled))
     self.show_full_screen = enabled
-    self.setParam('show_full_screen', enabled)
     self.publish_status()
+    self.setParam('show_full_screen', enabled)
+    
 
   def setShowTargetsCb(self, msg):
     enabled = msg.data
@@ -1112,22 +1132,25 @@ class NepiAutoTurretApp(object):
     enabled = msg.data
     self.msg_if.pub_info("Setting show track to: " + str(enabled))
     self.show_track_enabled = enabled
-    self.setParam('show_track_enabled', enabled)
     self.publish_status()
+    self.setParam('show_track_enabled', enabled)
+    
 
   def setShowCrosshairCb(self, msg):
     enabled = msg.data
     self.msg_if.pub_info("Setting show crosshair to: " + str(enabled))
     self.show_goal_enabled = enabled
-    self.setParam('show_goal_enabled', enabled)
     self.publish_status()
+    self.setParam('show_goal_enabled', enabled)
+    
 
   def setImageStabEnableCb(self, msg):
     enabled = msg.data
     self.msg_if.pub_info("Setting image stab to: " + str(enabled))
     self.image_stab_enabled = enabled
-    self.setParam('image_stab_enabled', enabled)
     self.publish_status()
+    self.setParam('image_stab_enabled', enabled)
+    
 
   ###############################
   # Derived State
@@ -1167,11 +1190,6 @@ class NepiAutoTurretApp(object):
       return False
     return self.pantilt_connected == True and nepi_sdk.check_for_topic(navpose_topic) == True
 
-  def getPanControlDisabled(self):
-    return (self.pan_control_manaul_enabled == False and self.pan_control_auto_enabled == False)
-
-  def getTiltControlDisabled(self):
-    return (self.tilt_control_manaul_enabled == False and self.tilt_control_auto_enabled == False)
 
   def setParam(self, param_name, value):
     if self.node_if is None:
@@ -1188,9 +1206,6 @@ class NepiAutoTurretApp(object):
       self.scanning_enabled = self.node_if.get_param('scanning_enabled')
       self.tracking_enabled = self.node_if.get_param('tracking_enabled')
       self.stabilize_enabled = self.node_if.get_param('stabilize_enabled')
-      self.speed_ratio = self.node_if.get_param('speed_ratio')
-      self.pan_speed_ratio = self.node_if.get_param('pan_speed_ratio')
-      self.tilt_speed_ratio = self.node_if.get_param('tilt_speed_ratio')
       self.auto_select_enabled = self.node_if.get_param('auto_select_enabled')
       self.max_process_rate_hz = self.node_if.get_param('max_process_rate_hz')
       self.max_image_pub_rate_hz = self.node_if.get_param('max_image_pub_rate_hz')
@@ -1264,6 +1279,8 @@ class NepiAutoTurretApp(object):
     if self.image_connect_if is not None:
           source_image_topic = self.image_connect_if.get_namespace()
 
+    #####################
+    # NavPose Dict
     navpose_dict = None
     if self.navpose_connect_if is not None:
           navpose_dict = self.navpose_connect_if.get_navpose_dict()
@@ -1275,59 +1292,73 @@ class NepiAutoTurretApp(object):
       navpose_dict = nepi_nav.convert_navpose_msg2dict(navpose_msg)
       #self.msg_if.pub_warn("Create Blank navpose dict: " + str(navpose_dict), throttle_s = 5)
 
+
+    #####################
+    # Targets Dict
     self.targets_lock.acquire()
     targets_dict_list = copy.deepcopy(self.targets_dict_list)
     targets_classes = copy.deepcopy(self.targets_classes)
     self.targets_lock.release()
-    track_dict = None 
+
 
 
     #####################
-    # Update Auto Process Data
-    auto_data = dict()
-    auto_data['pan_control_manaul_enabled'] = True
-    auto_data['pan_auto_manaul_enabled'] = False
-    auto_data['tilt_control_manaul_enabled'] = True
-    auto_data['tilt_auto_manaul_enabled'] = False
+    # PanTilt Dict
+    [pan_now_deg,tilt_now_deg] = [0,0]
+    pantilt_dict = nepi_sdk.convert_msg2dict(DevicePTXStatus())
+    pantilt_connect_if = self.pantilt_connect_if
+    if pantilt_connect_if is not None:
+      try:
+        [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
+        status_dict = pantilt_connect_if.get_status_dict()
+        #self.msg_if.pub_warn("Got pantilt_dict: " + str(pantilt_dict), throttle_s = 10)
+        if status_dict is not None:
+          status_dict['pan_now_deg'] = pan_now_deg
+          status_dict['tilt_now_deg'] = tilt_now_deg
+          pantilt_dict = status_dict
 
 
-    auto_results = dict()
-    auto_results['auto_pan_goal_ratio'] = 0
-    auto_results['auto_pan_goal_deg'] = 0
-    auto_results['auto_pan_error_deg'] = 0
-
-    auto_results['auto_tilt_goal_ratio'] = 0
-    auto_results['auto_tilt_goal_deg'] = 0
-    auto_results['auto_tilt_error_deg'] = 0
+      except Exception as e:
+        self.msg_if.pub_warn("Failed to process auto pt errors: " + str(e), throttle_s = 5)
+        pass
 
 
 
+    #################
+    ## Auto Dict
+    
+    pan_update_dict = copy.deepcopy(self.pan_update_dict)
+    self.pan_update_dict = auto_process.get_blank_update_dict()
+    tilt_update_dict = copy.deepcopy(self.tilt_update_dict)
+    self.tilt_update_dict = auto_process.get_blank_update_dict()
 
+    pan_axis_dict = copy.deepcopy(self.pan_axis_dict)
+    tilt_axis_dict = copy.deepcopy(self.tilt_axis_dict)
 
 
     #####################
     # Run Process
     #####################
-    pan_manual = auto_data['pan_control_manaul_enabled']
-    pan_auto = auto_data['pan_auto_manaul_enabled']
-    tilt_manual = auto_data['tilt_control_manaul_enabled']
-    tilt_auto = auto_data['tilt_auto_manaul_enabled']
+
+
+
+    #####################
+    # Run Scan Process
+    scan_results_dict = None
+
+
+
 
 
     #####################
     # Run Track Process
-    track_process_results = None
+    track_results_dict = None
     
     if self.track_process_if is not None:
 
-      ### Update Data Dict
-      self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)  
-      
-
-      self.track_process_if.set_data_value('navpose_dict', navpose_dict)
-
-
       ### Update Process Dictionaries
+      self.track_process_if.set_data_value('targets_dict_list', targets_dict_list)  
+      self.track_process_if.set_data_value('navpose_dict', navpose_dict)
 
       track_classes = self.track_classes
       class_filters = []
@@ -1343,120 +1374,65 @@ class NepiAutoTurretApp(object):
       #self.msg_if.pub_warn("Got track classes: " + str([class_filters, track_classes, targets_classes]), throttle_s = 10)
           
       ### Process Results
-      track_process_results = self.track_process_if.process_results(source_topic = source_image_topic)
-      # self.msg_if.pub_warn("Got track_process_results: " + str(track_process_results), throttle_s = 10)
+      track_results_dict = self.track_process_if.process_results(source_topic = source_image_topic)
+      # self.msg_if.pub_warn("Got track_results_dict: " + str(track_results_dict), throttle_s = 10)
+
+
+    #####################
+    # Run Stab Process
+    stab_results_dict = None
+
+
+    #####################
+    # Run Auto Process
 
 
     
-    #####################
-    # Update Auto Process Data
-    [pan_now_deg,tilt_now_deg] = [0,0]
-    pantilt_status_dict = nepi_sdk.convert_msg2dict(DevicePTXStatus())
-    pantilt_connect_if = self.pantilt_connect_if
-    if pantilt_connect_if is not None:
-      try:
-        [pan_now_deg,tilt_now_deg] = pantilt_connect_if.get_pan_tilt_position()
-        status_dict = pantilt_connect_if.get_status_dict()
-        #self.msg_if.pub_warn("Got pantilt_status_dict: " + str(pantilt_status_dict), throttle_s = 10)
-        if status_dict is not None:
-          pantilt_status_dict = status_dict
+    if self.auto_process_if is not None:
 
+       ### Update Process Dictionaries
+      self.auto_process_if.set_data_value('scanning_enabled', self.scanning_enabled)
+      self.auto_process_if.set_data_value('tracking_enabled', self.tracking_enabled)
+      self.auto_process_if.set_data_value('stabilize_enabled', self.stabilize_enabled)
 
-      except Exception as e:
-        self.msg_if.pub_warn("Failed to process auto pt errors: " + str(e), throttle_s = 5)
-        pass
+      self.auto_process_if.set_data_value('pan_update_dict', pan_update_dict)
+      self.auto_process_if.set_data_value('tilt_update_dict', tilt_update_dict)
 
+      self.auto_process_if.set_data_value('pan_axis_dict', pan_axis_dict)
+      self.auto_process_if.set_data_value('tilt_axis_dict', tilt_axis_dict) 
 
-    pan_goal_deg = pantilt_status_dict['pan_goal_deg']
-    tilt_goal_deg = pantilt_status_dict['tilt_goal_deg']
+      self.auto_process_if.set_data_value('pantilt_dict', pantilt_dict)  
+      self.auto_process_if.set_data_value('navpose_dict', navpose_dict)
 
-    pan_now_ratio = pantilt_status_dict['pan_now_ratio']
-    tilt_now_ratio = pantilt_status_dict['tilt_now_ratio']
+      self.auto_process_if.set_data_value('scan_results_dict', scan_results_dict)
+      self.auto_process_if.set_data_value('track_results_dict', track_results_dict)
+      self.auto_process_if.set_data_value('stab_results_dict', stab_results_dict)
 
-    pan_goal_ratio = pantilt_status_dict['pan_goal_ratio']
-    tilt_goal_ratio = pantilt_status_dict['tilt_goal_ratio']
+      ### Process Results
+      auto_results_dict = self.auto_process_if.process_results(source_topic = source_image_topic)
+      # self.msg_if.pub_warn("Got auto_results_dict: " + str(auto_results_dict), throttle_s = 10)    
 
-
-    has_limit_controls = pantilt_status_dict['has_limit_controls']
-    pan_min_hardstop_deg = pantilt_status_dict['pan_min_hardstop_deg']
-    pan_max_hardstop_deg = pantilt_status_dict['pan_max_hardstop_deg']
-    tilt_min_hardstop_deg = pantilt_status_dict['tilt_min_hardstop_deg']
-    tilt_max_hardstop_deg = pantilt_status_dict['tilt_max_hardstop_deg']
-
-    pan_min_softstop_deg = pantilt_status_dict['pan_min_softstop_deg']
-    pan_max_softstop_deg = pantilt_status_dict['pan_max_softstop_deg']
-    tilt_min_softstop_deg = pantilt_status_dict['tilt_min_softstop_deg']
-    tilt_max_softstop_deg = pantilt_status_dict['tilt_max_softstop_deg']
-
+      auto_data_dict = self.auto_process_if.get_data_dict()
+      # self.msg_if.pub_warn("Got auto_data_dict: " + str(auto_data_dict), throttle_s = 10) 
 
     #####################
     # Apply Process Outputs
     #####################
 
-    if navpose_dict is None:
-        navpose_dict = nepi_nav.BLANK_NAVPOSE_DICT
-    if navpose_dict['has_pan_tilt'] == True:
-        if navpose_dict['has_heading'] == True:
-            heading_deg = navpose_dict.get('pan_tilt_heading_deg',-999)
-        else:
-            heading_deg = navpose_dict.get('pan_tilt_yaw_deg',-999)
-        pitch_deg = navpose_dict.get('pan_tilt_pitch_deg',-999) 
-        roll_deg = navpose_dict.get('pan_tilt_roll_deg',-999)
-    else:
-        if navpose_dict['has_heading'] == True:
-            heading_deg = navpose_dict.get('heading_deg',-999)
-        else:
-            heading_deg = navpose_dict.get('yaw_deg',-999)
-        pitch_deg = navpose_dict.get('pitch_deg',-999) 
-        roll_deg = navpose_dict.get('roll_deg',-999)
-
-    if int(heading_deg) == -999:
-        heading_deg = 0
-    
-    if int(pitch_deg) == -999:
-        pitch_deg = 0
-      
-    if int(roll_deg) == -999:
-        roll_deg = 0
-
-
-    if self.tracking_enabled == True and track_process_results is not None:
-      track_heading_deg = track_process_results['heading_deg']
-      track_pitch_deg = track_process_results['pitch_deg']
-      track_roll_deg = track_process_results['roll_deg']
-
-      auto_pan_error_deg = -1 * (heading_deg - track_heading_deg)
-      auto_tilt_error_deg = -1 * (pitch_deg - track_pitch_deg)
-    else:
-      auto_pan_error_deg = -1 * (pan_now_deg - pan_goal_deg)
-      auto_tilt_error_deg = -1 * (tilt_now_deg - tilt_goal_deg)
-
-    auto_results['auto_pan_error_deg'] = auto_pan_error_deg
-    auto_results['auto_tilt_error_deg'] = auto_tilt_error_deg
-
-    # self.msg_if.pub_warn("Got auto pt errors: " + str([auto_pan_error_deg,auto_tilt_error_deg]), throttle_s = 5)
-    #####################
-    # Update Auto Pan Status Values
-
-    try:
-      auto_pan_error_deg = round(auto_results['auto_pan_error_deg'], 2)
-      auto_tilt_error_deg = round(auto_results['auto_tilt_error_deg'], 2)
-
-      self.status_msg.auto_pan_error_deg = auto_pan_error_deg
-      self.status_msg.auto_tilt_error_deg = auto_tilt_error_deg
-    except Exception as e:
-      self.msg_if.pub_warn("Failed to get auto pt errors: " + str(e), throttle_s = 5)
-      pass
-
+    #############################
+    # Class Variable Updates
+    self.pan_axis_dict = auto_data_dict.get('pan_axis_dict',self.pan_axis_dict)
+    self.tilt_axis_dict = auto_data_dict.get('tilt_axis_dict',self.tilt_axis_dict)
+  
 
     #############################
-
     # Apply Image Stabilization if Required
-
-
-    if self.image_stab_enabled == True:
+    roll_goal = 0
+    if auto_results_dict is not None:
+      roll_goal = auto_results_dict.get('roll_goal', 0)
+    if self.image_stab_enabled == True and roll_goal != -999:
         self.node_if.publish_pub('set_live_adjust_enable', True)
-        self.node_if.publish_pub('set_live_adjust_rotate_deg', roll_deg)
+        self.node_if.publish_pub('set_live_adjust_rotate_deg', roll_goal)
     else:
         self.node_if.publish_pub('set_live_adjust_enable', False)
         self.node_if.publish_pub('set_live_adjust_rotate_deg',0)
@@ -1474,13 +1450,33 @@ class NepiAutoTurretApp(object):
     # Re-arm this loop, not updaterCb. Re-arming the updater here ran the
     # process body exactly once and then drove the 1 Hz updater at the process
     # rate instead.
-    #self.msg_if.pub_warn("Auto Pan Error: Track Pan Error: Next Time: Track Dict " + str([auto_data['auto_tilt_error_deg'], track_msg.azimuth_deg, next_process_delay, track_dict]), throttle_s = 5)
+    #self.msg_if.pub_warn("Auto Pan Error: Track Pan Error: Next Time: Track Dict " + str([auto_data['tilt_error_deg'], track_msg.azimuth_deg, next_process_delay, track_dict]), throttle_s = 5)
     nepi_sdk.start_timer_process(next_process_delay, self.processCb, oneshot = True)
 
 
 
   ###################
   ## Status Publishers
+
+  def get_axis_status_msg(self,axis = 'pan'):
+    axis_msg = AutoTurretAxis()
+    if axis == 'pan':
+      axis_dict = copy.deepcopy(self.pan_axis_dict)
+    elif axis == 'tilt':
+      axis_dict = copy.deepcopy(self.tilt_axis_dict)
+    else:
+      return axis_msg
+    msg_dict = auto_process.get_blank_axis_dict()
+    for key in axis_dict.keys():
+      if key in msg_dict.keys():
+        msg_dict[key] = axis_dict[key]
+    msg_type = 'nepi_app_auto_turret/AutoTurretAxis'
+    try:
+      axis_msg = nepi_sdk.convert_dict2msg(msg_type,msg_dict)
+    except Exception as e:
+      self.msg_if.pub_info("Failed to convert axis dict to msg: " + str(e), throttle_s = 5)
+    return axis_msg
+
 
   def statusPublishCb(self, timer):
     self.publish_status(check = False)
@@ -1570,15 +1566,8 @@ class NepiAutoTurretApp(object):
     self.status_msg.stab_process_namespace = self.stab_process_namespace
 
 
-    self.status_msg.pan_control_manaul_enabled = self.pan_control_manaul_enabled
-    self.status_msg.tilt_control_manaul_enabled = self.tilt_control_manaul_enabled
-
-    self.status_msg.pan_control_auto_enabled = self.pan_control_auto_enabled
-    self.status_msg.tilt_control_auto_enabled = self.tilt_control_auto_enabled
-
-    self.status_msg.pan_control_disabled = self.getPanControlDisabled()
-    self.status_msg.tilt_control_disabled = self.getTiltControlDisabled()
-
+    self.status_msg.auto_pan_axis = self.get_axis_status_msg('pan')
+    self.status_msg.auto_tilt_axis = self.get_axis_status_msg('tilt')
 
     self.status_msg.image_pub_topic = self.img_pub_topic
 

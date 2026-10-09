@@ -86,6 +86,8 @@ class AutoTurretImgPub:
     track_results = None
     track_lock = threading.Lock()
     track_results_time = 0
+    tracking_enabled = False
+    was_tracking = False
     show_track_enabled = False
 
     goal_error_degs = [0,0]
@@ -473,7 +475,7 @@ class AutoTurretImgPub:
             img_status_dict = copy.deepcopy(self.img_info_dict['status_dict'])
 
 
-            #########################\
+            #########################
             draw_targets = (self.show_targets_enabled == True)
             if draw_targets == True:       
                 targets_list = []     
@@ -491,29 +493,44 @@ class AutoTurretImgPub:
                     cv2_img = self.process_targets_image(cv2_img, img_status_dict, controls_dict, targets_results)
 
             #########################
-            draw_track = (self.show_track_enabled == True)
-            if draw_track == True:
-                self.img_if.set_targets_size_ratio(0.4)
-                self.img_if.set_targets_thickness_ratio(0.4)
-                self.img_if.set_targets_text_ratio(0.3)
-                self.img_if.set_overlay_target_degrees(True)
-            else:
-                self.img_if.remove_target('Track Goal')
+            
+            draw_track = self.show_track_enabled
+            was_tracking = self.was_tracking
+            track_results = copy.deepcopy(self.track_results)
+
+            if self.draw_track != draw_track or self.tracking_enabled != self.was_tracking:
+                if draw_track == True:
+                    if self.tracking_enabled == True:
+                        thickness_ratio = 0.4
+                        show_degress = True
+                    else:
+                        thickness_ratio = 0.3
+                        show_degress = False
+                    self.img_if.set_targets_size_ratio(0.4)
+                    self.img_if.set_targets_thickness_ratio(thickness_ratio)
+                    self.img_if.set_targets_text_ratio(0.3)
+                    self.img_if.set_overlay_target_degrees(show_degress)
+
+                else: 
+                    self.img_if.remove_target('Track Goal')
             self.img_if.set_targets_enable(draw_track)
             self.draw_track = draw_track
+            self.was_tracking = self.tracking_enabled
 
             if draw_track == True:
 
                 [x_deg,y_deg] = [0,0]                                
-                track_results = copy.deepcopy(self.track_results)
-
                 if track_results is None:      
-                    #self.msg_if.pub_info('No Track to Draw: ', throttle_s = 5)
-                    pass
+                    self.img_if.remove_target('Track Goal')
+
                 else:      
                     try:
                         [x_deg,y_deg] = [track_results['azimuth_deg'],track_results['elevation_deg']]
-                        self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = OVERLAY_TRACK_COLOR)
+                        if self.tracking_enabled == True:
+                            track_color = OVERLAY_TRACK_COLOR
+                        else:
+                            track_color = (255,255,255)
+                        self.img_if.add_target_degs(x_deg,y_deg, name = 'Track Goal', color_rgb = track_color)
                     except Exception as e:
                         self.msg_if.pub_info('Draw Target Failed: ' + str(track_results) + " with exception: " + str(e), throttle_s = 5)
 
@@ -744,10 +761,12 @@ class AutoTurretImgPub:
         if last_sel_imgs != self.selected_image_topic:
             self.msg_if.pub_info("Updating selected image topic: " + str(self.selected_image_topic))
 
+        self.tracking_enabled = msg.tracking_enabled
+
         self.show_targets_enabled = msg.show_targets_enabled
         self.show_track_enabled = msg.show_track_enabled
         self.show_goal_enabled = msg.show_goal_enabled
-        self.goal_error_degs = [msg.auto_pan_error_deg, msg.auto_tilt_error_deg]
+        self.goal_error_degs = [msg.auto_pan_axis.error_deg, msg.auto_tilt_axis.error_deg]
         self.image_stab_enabled = msg.image_stab_enabled
 
 

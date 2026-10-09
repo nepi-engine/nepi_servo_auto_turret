@@ -149,20 +149,15 @@ class NepiAppAutoTurret extends Component {
 
   // Callback for handling ROS Status messages
   statusListener(message) {
-    // Seed the manual GoTo entries from the device's reported goal, and reseed
-    // whenever an auto mode takes or releases an axis so a stale hand-typed
-    // value is never left in the box. This belongs here and not in
-    // renderPTControls: a setState from inside render loops.
+
     const pantilt_status_msg = message.pantilt_status_msg
 
-    const pan_disabled = (message.pan_control_manaul_enabled === true)
-    const pan_goal_deg = round((message.pan_control_manaul_enabled === true) ? pantilt_status_msg.pan_goal_deg : message.auto_pan_goal_deg, 1)
+    const pan_goal_deg = round(message.pan_goal_deg, 1)
     if (this.state.panGoto == null || pan_goal_deg !== this.state.lastPanGoto) {
       this.setState({ panGoto: pan_goal_deg, lastPanGoto: pan_goal_deg})
     }
 
-    const tilt_disabled = (message.tilt_control_disabled === true)
-    const tilt_goal_deg = round((message.tilt_control_manaul_enabled === true) ? pantilt_status_msg.tilt_goal_deg : message.auto_tilt_goal_deg, 1)
+    const tilt_goal_deg = round(message.tilt_goal_deg, 1)
     if (this.state.tiltGoto == null || tilt_goal_deg !== this.state.lastTiltGoto) {
       this.setState({ tiltGoto: tilt_goal_deg, lastTiltGoto: tilt_goal_deg})
     }
@@ -366,13 +361,9 @@ class NepiAppAutoTurret extends Component {
     const status_msg = this.state.status_msg
     const pantilt_namespace = status_msg.selected_pantilt_topic
 
-    const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
-    const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
-    const pan_control_pos_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_position'  : app_namespace + '/set_pan_pos_deg'
+    const pan_control_pos_namespace = app_namespace + '/set_pan_pos_deg'
 
-    const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
-    const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
-    const tilt_control_pos_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_position'  : app_namespace + '/set_tilt_pos_deg'
+    const tilt_control_pos_namespace = app_namespace + '/set_tilt_pos_deg'
 
     var panElement = null
     var tiltElement = null
@@ -437,37 +428,16 @@ class NepiAppAutoTurret extends Component {
       const has_seperate_pan_tilt_speed = (pantilt_status_msg.has_seperate_pan_tilt_control === true)
       const has_speed_control = (pantilt_status_msg.has_adjustable_speed === true)
 
-      const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
-      const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
-      const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
-      const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+      const pan_jog_disabled = status_msg.auto_pan_axis.jog_disabled === true || pantilt_connected === false
+      const pan_control_namespace = app_namespace
 
 
-      const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
-      const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
-      const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
-      const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
-
-      const panPositionClean = pantilt_status_msg.pan_now_deg + .001
-      const tiltPositionClean = pantilt_status_msg.tilt_now_deg + .001
-
-      const panCurSpeedClean = pantilt_status_msg.speed_pan_dps + .001
-      const tiltCurSpeedClean = pantilt_status_msg.speed_tilt_dps + .001
+      const tilt_jog_disabled = status_msg.auto_tilt_axis.jog_disabled === true || pantilt_connected === false
+      const tilt_control_namespace = app_namespace
 
       // The app's own stored ratios, which it pushes to the device on connect.
       const speedPanRatio = pantilt_status_msg.speed_pan_ratio
       const speedTiltRatio = pantilt_status_msg.speed_tilt_ratio
-      const speedPanTiltRatio = pantilt_status_msg.speed_ratio
-
-      // pan_tilt_max_speed_dps is UNSET_VALUE (-999) until the app has a
-      // connected device to ask, which would render a negative dps readout;
-      // fall back to what the device reports for itself.
-      const maxSpeed = pantilt_status_msg.speed_max_dps
-      const panSetSpeed = speedPanRatio * maxSpeed
-      const tiltSetSpeed = speedTiltRatio * maxSpeed
-
-      const panSetSpeedClean = panSetSpeed + .001
-      const tiltSetSpeedClean = tiltSetSpeed + .001
 
 
         // Editable values for the (commented out) GoTo inputs. They live in state
@@ -487,14 +457,14 @@ class NepiAppAutoTurret extends Component {
           {(has_homing === true && has_seperate_pan_tilt_control === true) ?
             <ButtonMenu>
               <Button onClick={() => this.onStopClick(app_namespace,pantilt_namespace)}>{"STOP"}</Button>
-              <Button disabled={pan_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/pan_home')}>{"P-HOME"}</Button>
-              <Button disabled={tilt_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(tilt_control_namespace + '/tilt_home')}>{"T-HOME"}</Button>
+              <Button disabled={pan_jog_disabled} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/pan_home')}>{"P-HOME"}</Button>
+              <Button disabled={tilt_jog_disabled} onClick={() => this.props.ros.sendTriggerMsg(tilt_control_namespace + '/tilt_home')}>{"T-HOME"}</Button>
             </ButtonMenu>
                   : (has_homing === true) ?
 
                       <ButtonMenu>
                       <Button onClick={() => this.onStopClick(app_namespace,pantilt_namespace)}>{"STOP"}</Button>
-                      <Button disabled={pan_control_manaul_enabled === false || tilt_control_manaul_enabled === false} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/go_home')}>{"HOME"}</Button>
+                      <Button disabled={pan_jog_disabled} onClick={() => this.props.ros.sendTriggerMsg(pan_control_namespace + '/go_home')}>{"HOME"}</Button>
                     </ButtonMenu>
                     :
                         <ButtonMenu>
@@ -508,25 +478,25 @@ class NepiAppAutoTurret extends Component {
                           <ButtonMenu>
 
                             <Button
-                              disabled={pan_control_manaul_enabled === false} 
+                              disabled={pan_jog_disabled} 
                               buttonDownAction={() => onPTXJogPan(pantilt_namespace,  1)}
                               buttonUpAction={() => onPTXPanStop(pantilt_namespace)}>
                               {'\u25C0'}
                             </Button>
                             <Button
-                              disabled={pan_control_manaul_enabled === false} 
+                              disabled={pan_jog_disabled} 
                               buttonDownAction={() => onPTXJogPan(pantilt_namespace, -1)}
                               buttonUpAction={() => onPTXPanStop(pantilt_namespace)}>
                               {'\u25B6'}
                             </Button>
                             <Button
-                              disabled={tilt_control_manaul_enabled === false}
+                              disabled={tilt_jog_disabled}
                               buttonDownAction={() => onPTXJogTilt(pantilt_namespace, -1)}
                               buttonUpAction={() => onPTXTiltStop(pantilt_namespace)}>
                               {'\u25B2'}
                             </Button>
                             <Button
-                              disabled={tilt_control_manaul_enabled === false}
+                              disabled={tilt_jog_disabled}
                               buttonDownAction={() => onPTXJogTilt(pantilt_namespace,  1)}
                               buttonUpAction={() => onPTXTiltStop(pantilt_namespace)}>
                               {'\u25BC'}
@@ -561,25 +531,18 @@ class NepiAppAutoTurret extends Component {
 
     }
     else {
-      const { onPTXJogPan, onPTXJogTilt, onPTXJogSpeedPan, onPTXJogSpeedTilt, onPTXStop, onPTXPanStop, onPTXTiltStop } = this.props.ros
       const pantilt_namespace = status_msg.selected_pantilt_topic
       const pantilt_status_msg = status_msg.pantilt_status_msg
       const has_abs_pos = (pantilt_status_msg.has_absolute_positioning === true)
-      const has_homing = (pantilt_status_msg.has_homing === true)
-      const has_seperate_pan_tilt_control = (pantilt_status_msg.has_seperate_pan_tilt_control === true)
+
       const has_seperate_pan_tilt_speed = (pantilt_status_msg.has_seperate_pan_tilt_control === true)
       const has_speed_control = (pantilt_status_msg.has_adjustable_speed === true)
 
-      const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
-      const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
-      const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
-      const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+      const pan_pos_disabled = status_msg.auto_pan_axis.pos_disabled === true || pantilt_connected === false
+      const tilt_pos_disabled = status_msg.auto_tilt_axis.pos_disabled === true || pantilt_connected === false
 
-
-      const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
-      const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
-      const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
-      const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+      const pan_speed_disabled = status_msg.auto_pan_axis.speed_disabled === true || pantilt_connected === false
+      const tilt_speed_disabled = status_msg.auto_tilt_axis.speed_disabled === true || pantilt_connected === false
 
       const panPositionClean = pantilt_status_msg.pan_now_deg + .001
       const tiltPositionClean = pantilt_status_msg.tilt_now_deg + .001
@@ -623,7 +586,7 @@ class NepiAppAutoTurret extends Component {
 
               <Label title={"GoTo Position "}>
                 <Input
-                  disabled={pan_control_disabled === true}
+                  disabled={pan_pos_disabled === true}
                   id={"PTXPanGoto"}
                   style={{ width: "45%", float: "left" }}
                   value={pan_pos}
@@ -631,7 +594,7 @@ class NepiAppAutoTurret extends Component {
                   onKeyDown= {this.onPTKeyText}
                 />
                 <Input
-                  disabled={tilt_control_disabled === true}
+                  disabled={tilt_pos_disabled === true}
                   id={"PTXTiltGoto"}
                   style={{ width: "45%" }}
                   value={tilt_pos}
@@ -678,16 +641,16 @@ class NepiAppAutoTurret extends Component {
                   ratios as params and re-pushes them to the device on connect,
                   so setting speed while scanning or tracking is legitimate and
                   the node's setPanSpeedRatioCb accepts it. (The source app
-                  gated these on auto_pan_position_disabled, a field that does
+                  gated these on pan_position_disabled, a field that does
                   not exist in AutoTurretStatus, so the guard read undefined and
                   never fired anyway.) */}
               <React.Fragment>
                 <SliderAdjustment
-                  disabled={pan_control_manaul_enabled === false}
+                  disabled={pan_speed_disabled}
                   title={"Pan Speed"}
                   msgType={"std_msgs/Float32"}
                   adjustment={speedPanRatio}
-                  topic={pantilt_namespace + "/set_pan_speed_ratio"}
+                  topic={app_namespace + "/set_pan_speed_ratio"}
                   scaled={0.01}
                   min={0}
                   max={100}
@@ -696,11 +659,11 @@ class NepiAppAutoTurret extends Component {
                   unit={""}
                 />
                 <SliderAdjustment
-                  disabled={tilt_control_manaul_enabled === false}
+                  disabled={tilt_speed_disabled === false}
                   title={"Tilt Speed"}
                   msgType={"std_msgs/Float32"}
                   adjustment={speedTiltRatio}
-                  topic={pantilt_namespace + "/set_tilt_speed_ratio"}
+                  topic={app_namespace + "/set_tilt_speed_ratio"}
                   scaled={0.01}
                   min={0}
                   max={100}
@@ -718,16 +681,16 @@ class NepiAppAutoTurret extends Component {
                   ratios as params and re-pushes them to the device on connect,
                   so setting speed while scanning or tracking is legitimate and
                   the node's setPanSpeedRatioCb accepts it. (The source app
-                  gated these on auto_pan_position_disabled, a field that does
+                  gated these on pan_position_disabled, a field that does
                   not exist in AutoTurretStatus, so the guard read undefined and
                   never fired anyway.) */}
               <React.Fragment>
                 <SliderAdjustment
-                  disabled={pan_control_manaul_enabled === false}
+                  disabled={pan_speed_disabled === true || tilt_speed_disabled === true}
                   title={"PanTilt Speed"}
                   msgType={"std_msgs/Float32"}
                   adjustment={speedPanTiltRatio}
-                  topic={pantilt_namespace + "/set_speed_ratio"}
+                  topic={app_namespace + "/set_speed_ratio"}
                   scaled={0.01}
                   min={0}
                   max={100}
@@ -801,25 +764,19 @@ class NepiAppAutoTurret extends Component {
         const has_abs_pos = pantilt_status_msg.has_absolute_positioning === true
       
 
-        const pan_control_disabled = status_msg.pan_control_disabled === true || pantilt_connected === false
-        const pan_control_manaul_enabled = status_msg.pan_control_manaul_enabled
-        const pan_control_auto_enabled = status_msg.pan_control_auto_enabled
-        const pan_control_namespace = (pan_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+        const pan_pos_disabled = status_msg.auto_pan_axis.pos_disabled === true || pantilt_connected === false
         var pan_goal_ratio = 0.5
         if (pantilt_connected === true) {
-            pan_goal_ratio = (pan_control_manaul_enabled === true) ? pantilt_status_msg.pan_goal_ratio : status_msg.auto_pan_ratio 
+            pan_goal_ratio = status_msg.auto_pan_axis.goal_ratio
         }
-        const pan_slider_topic = (pan_control_manaul_enabled === true) ? pantilt_namespace + '/goto_pan_ratio'  : app_namespace + '/set_pan_pos_ratio'
+        const pan_slider_topic = app_namespace + '/set_pan_pos_ratio'
 
-        const tilt_control_disabled = status_msg.tilt_control_disabled === true || pantilt_connected === false
-        const tilt_control_manaul_enabled = status_msg.tilt_control_manaul_enabled
-        const tilt_control_auto_enabled = status_msg.tilt_control_auto_enabled
-        const tilt_control_namespace = (tilt_control_manaul_enabled === true) ? pantilt_namespace : app_namespace
+        const tilt_pos_disabled = status_msg.auto_tilt_axis.pos_disabled === true || pantilt_connected === false
         var tilt_goal_ratio = 0.5
         if (pantilt_connected === true) {
-            tilt_goal_ratio = (tilt_control_manaul_enabled === true) ? pantilt_status_msg.tilt_goal_ratio : status_msg.auto_tilt_ratio 
+            tilt_goal_ratio = status_msg.auto_tilt_axis.goal_ratio
         }
-        const tilt_slider_topic = (tilt_control_manaul_enabled === true) ? pantilt_namespace + '/goto_tilt_ratio'  : app_namespace + '/set_tilt_pos_ratio'
+        const tilt_slider_topic = app_namespace + '/set_tilt_pos_ratio'
 
         // Match the tilt slider to the rendered viewer height. offsetHeight is read
         // off the previous paint, so the first render has no element yet and comes
@@ -849,6 +806,23 @@ class NepiAppAutoTurret extends Component {
 
         
                           <div style={{ width: '4%' }} centered={"true"} >
+                              {null}
+                            </div>
+
+
+                            <div style={{ width: '10%' }} centered={"true"}>
+
+                              <Label title="Show Goal">
+                                <AsyncToggle
+                                  checked={show_goal_enabled === true}
+                                  onClick={() => sendBoolMsg(app_namespace + "/set_show_crosshair", show_goal_enabled === false)}>
+                                </AsyncToggle>
+                              </Label>
+
+                            </div>
+
+
+                            <div style={{ width: '4%' }} centered={"true"} >
                               {null}
                             </div>
 
@@ -887,23 +861,6 @@ class NepiAppAutoTurret extends Component {
                               {null}
                             </div>
 
-
-                            <div style={{ width: '10%' }} centered={"true"}>
-
-                  <Label title="Show Goal">
-                    <AsyncToggle
-                      checked={show_goal_enabled === true}
-                      onClick={() => sendBoolMsg(app_namespace + "/set_show_crosshair", show_goal_enabled === false)}>
-                    </AsyncToggle>
-                  </Label>
-
-
-                            </div>
-
-
-                            <div style={{ width: '4%' }} centered={"true"} >
-                              {null}
-                            </div>
 
 
                             <div style={{ width: '10%' }} centered={"true"}>
@@ -953,7 +910,7 @@ class NepiAppAutoTurret extends Component {
                     title={"Pan"}
                     msgType={"std_msgs/Float32"}
                     adjustment={pan_goal_ratio}
-                    disabled={pan_control_disabled === true}
+                    disabled={pan_pos_disabled === true}
                     topic={pan_slider_topic}
                     scaled={0.01}
                     min={0}
@@ -975,7 +932,7 @@ class NepiAppAutoTurret extends Component {
                     title={"Tilt"}
                     msgType={"std_msgs/Float32"}
                     adjustment={tilt_goal_ratio}
-                    disabled={tilt_control_disabled === true}
+                    disabled={tilt_pos_disabled === true}
                     topic={tilt_slider_topic}
                     scaled={0.01}
                     min={0}
@@ -1031,7 +988,7 @@ class NepiAppAutoTurret extends Component {
   
 
 
-          <div style={{ borderTop: "1px solid #777777", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
+          <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }} />
 
         <Label title={"Process Connections"}></Label>
 
@@ -1162,7 +1119,7 @@ class NepiAppAutoTurret extends Component {
 
 
                     </div>
-                    
+
                   <div style={{ display: "inline-block", width: "5%"}}>{}</div>
 
                   <div style={{ display: "inline-block", width: "20%", float: "left" }}>
@@ -1215,6 +1172,7 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.scan_process_namespace}
+        allways_show_data={true}
         allways_show_controls={true}
         />
         : null}
@@ -1225,6 +1183,7 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.track_process_namespace}
+        allways_show_data={true}
         allways_show_controls={true}
         />
         : null}
@@ -1234,15 +1193,11 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.stab_process_namespace}
+        allways_show_data={true}
         allways_show_controls={true}
         />
         : null}
 
-
-
-      { ( show_control === 'auto' ) ?
-        this.renderConnections()
-        : null}
 
     { ( show_control === 'auto' ) ?
      <SliderAdjustment
@@ -1280,11 +1235,12 @@ class NepiAppAutoTurret extends Component {
         make_section={false}
         title={null}
         namespace={ status_msg.auto_process_namespace}
+        allways_show_data={true}
         allways_show_controls={true}
         />
         : null}
 
-
+      { this.renderConnections() }
 
    
 

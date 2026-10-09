@@ -35,6 +35,7 @@ nepi_interfaces/NavPoseStatus navpose_status_msg
 # The auto process is the supervisor: it owns the pan/tilt control loop that
 # the scan, track and stabilize modes select between. Nothing auto-drives an
 # axis unless auto is enabled.
+
 bool auto_ready
 bool auto_enabled
 string auto_process_namespace
@@ -42,7 +43,6 @@ string auto_process_namespace
 bool scanning_ready
 bool scanning_enabled
 string scan_process_namespace
-
 
 bool tracking_ready
 bool tracking_enabled
@@ -53,25 +53,11 @@ bool stabilize_enabled
 string stab_process_namespace
 
 
-bool pan_control_manaul_enabled
-bool tilt_control_manaul_enabled
-
-bool pan_control_auto_enabled
-bool tilt_control_auto_enabled
-
-bool pan_control_disabled
-bool tilt_control_disabled
-
-
 #############################
-float32 auto_pan_goal_ratio
-float32 auto_tilt_goal_ratio
+# Pan Tilt Axis Info
 
-float32 auto_pan_goal_deg
-float32 auto_tilt_goal_deg
-
-float32 auto_pan_error_deg
-float32 auto_tilt_error_deg
+nepi_app_auto_turret/AutoTurretAxis auto_pan_axis
+nepi_app_auto_turret/AutoTurretAxis auto_tilt_axis
 
 ##############
 # Image Pub Info
